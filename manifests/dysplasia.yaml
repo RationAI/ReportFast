@@ -1,0 +1,113 @@
+# The dysplasia report, as data.
+#
+#     reportfast plan   manifests/dysplasia.yaml      # writes nothing; read this first
+#     reportfast build  manifests/dysplasia.yaml      # -> reports/dysplasia.html
+#     reportfast build  manifests/dysplasia.yaml --publish   # the only upload
+#
+# This is scripts/dysplasia_tile_masks.py translated into the manifest vocabulary,
+# which is the point: the same report, but a human can diff it, correct one run id
+# in it, and an agent can edit it without touching Python. The `scripts/` version
+# stays as the worked example of the library API underneath.
+#
+# Every id below came from `reportfast find <run-id> --path <dir>` or from the
+# MLflow UI. That is the rule this file exists to demonstrate: nothing here was
+# remembered, and a wrong run id in a manifest is not an error -- it is a layer
+# that quietly appears on no cases, which `plan` is what catches.
+
+title: Dysplasia report
+# No case count here, even though the Python version computed one: a manifest is
+# static text, so "32 cases" is a number that goes stale the moment `only:`
+# changes -- and a report whose subtitle contradicts its own cards is the kind of
+# small lie that makes a reader distrust the rest. `plan` prints the real numbers.
+subtitle: Tile-level QC overlays and dysplasia annotations
+out: ../reports/dysplasia.html
+
+# The .czi backgrounds resolve through a protocol registered in the deployment's
+# env.json. Everything else about the deployment -- viewer root, tile root, the
+# /mnt prefix that becomes a DataID -- is the built-in default and is not written
+# down here. Aim this manifest at a second deployment with --base-url and
+# --image-protocol rather than by editing it.
+endpoint:
+  image_protocol: wsi_service
+
+flow:
+  tracking_uri: http://mlflow.rationai-mlflow:5000/
+
+# The slides. 378 files; `only:` is what makes this a report about 32 of them.
+background:
+  drive: /mnt/data/IKEM/colon/IBD_AI/dysplasia
+
+# mask_retrievers, in config order. A run source is listed, never downloaded: the
+# files under `path:` become DataIDs of the form
+# mflow/<experiment>/<run>/artifacts/<path>, which is what the tile server
+# addresses them by.
+#
+# Heatmaps by default. `visible` is left false on all but the last, because the
+# Hydra config left that one bare and a bare retriever drew by default -- so it
+# still does, and the two reports agree on what a reader sees first.
+masks:
+  - {name: Tissue, run: 97084241311949189445f864d42e9d4e, path: tissue_masks, color: "#ffff00", opacity: 0.5}
+  - {name: Blur, run: 10ec53e2cefd4e589e2d76d3373c8286, path: qc_output/blur_per_pixel, color: "#00ffff", opacity: 0.5}
+
+  # tile_masks holds no files of its own -- only subdirectories, one per class.
+  # Pointing at the parent would list nothing, so each class is its own layer.
+  - {name: Tiles - Blur, run: ad84f424e21742868a746c5fd8a9978b, path: tile_masks/blur, color: "#00ffff", opacity: 0.5}
+  - {name: Residual artifacts, run: 10ec53e2cefd4e589e2d76d3373c8286, path: qc_output/artifacts_per_pixel, color: "#00ffff", opacity: 0.5}
+  - {name: Tiles - Artifacts, run: ad84f424e21742868a746c5fd8a9978b, path: tile_masks/artifacts, color: "#00ffff", opacity: 0.5}
+
+  # A class map, not a heatmap: `classes` counts the distinct values, `palette`
+  # names them, `breaks` are the boundaries between them, and `mask` drops class
+  # 0 -- which is the slide itself, not an annotation.
+  - name: Annotations
+    run: 41d5e1d7d43641ea8f645f9b7945e9f7
+    path: annot_masks
+    opacity: 0.5
+    classes: 3
+    palette: ["#ffffff", "#ff0000", "#00ff00"]
+    breaks: [0.25, 0.75]
+    mask: [0, 1, 1]
+
+  - {name: Tiles - LG Dysplasia, run: ad84f424e21742868a746c5fd8a9978b, path: tile_masks/LG Dysplasia, color: "#00ff00", opacity: 0.5}
+  - {name: Tiles - HG Dysplasia, run: ad84f424e21742868a746c5fd8a9978b, path: tile_masks/HG Dysplasia, color: "#ff0000", opacity: 0.5}
+  - {name: Tiles - Epithelium, run: ad84f424e21742868a746c5fd8a9978b, path: tile_masks/epithelium, color: "#ff00ff", opacity: 0.5}
+  - {name: Tiles - Outline, run: ad84f424e21742868a746c5fd8a9978b, path: tile_masks/outlines, color: "#ffffff", opacity: 1.0}
+
+  # The one mask that is not in MLflow: a folder on the mount, downscaled masks.
+  - name: epithelium
+    drive: /mnt/projects/inflammatory_bowel_disease/ulcerative_colitis_dysplasia/epithelium_masks/downscale
+    visible: true
+
+# selected_items, verbatim from conf/dysplasia_tile_masks.yaml. Without this every
+# one of the ~370 slides in the folder is a case. The Python script this file replaces
+# carried only the first five -- which is what a demo looks like when it is copied
+# forward instead of being read.
+only: [
+  1094_18_HE_0, 1095_18_HE_0, 1095_18_HE_A, 11601_21_HE_0,
+  11601_21_HE_A, 11737_23_HE_0, 11737_23_HE_A, 2055_07_HE_0,
+  2055_07_HE_A, 2055_07_HE_B, 2473_17_HE_0, 2473_17_HE_A,
+  2473_17_HE_B, 2473_17_HE_C, 2473_17_HE_D, 2473_17_HE_E,
+  2866_17_HE_0, 3711_24_HE_0, 3783_24_HE_0, 4150_19_HE_0,
+  4150_19_HE_A, 4488_22_HE_0, 4488_22_HE_A, 6467_24_HE_0,
+  6497_17_HE_0, 6497_17_HE_A, 7217_22_HE_0, 7217_22_HE_A,
+  7262_24_HE_0, 8625_13_HE_0, 8625_13_HE_A, 9219_17_HE_0
+]
+
+# min_layer_count. Fewer overlays than this and the case is a retrieval mistake
+# rather than a finding, so it is dropped and `plan` says it was.
+min_layers: 3
+
+# Both paragraphs are still the boilerplate the Hydra config shipped with, kept
+# verbatim so this report and the one the old tool wrote read the same. Replacing
+# them is the first thing worth doing here: this text is the only part of the
+# report that says what the reader is looking at, and right now it says nothing.
+intro: >-
+  You can now specify a description field in your Hydra config under reporter:.
+  This text will be displayed before the slides in the generated report.Add your
+  description in the config (YAML)
+
+blocks:
+  - prose: You can now specify a description field in your Hydra config under reporter
+
+# Where the report is logged. Building never uploads to it; only --publish does,
+# and it repeats this id back before it goes.
+publish: e313fc2a62d54057b41b46057577c75d

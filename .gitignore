@@ -1,0 +1,22 @@
+# Environment and caches
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+build/
+dist/
+
+# Generated reports are build output; the manifests that produce them are not.
+# (DESIGN.md: same input, byte-identical HTML — regenerable freely.)
+reports/*.html
+*.provenance.json
+
+# Local MLflow tracking stores from ad-hoc publishes (`file:mlruns` experiments)
+mlruns/
+
+# Local tool settings: this workspace's permission grants and scratch, not the
+# project's. The skill that ships lives in skills/, not here.
+.claude/
+.qwen/

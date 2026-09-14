@@ -1,0 +1,120 @@
+{
+  "params": {
+    "sessionName": "mmci-NU22-03-00159",
+    "activeBackgroundIndex": 0
+  },
+  "data": [
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/preprocessed/MR_01_T1_plan_registered.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" }
+    },
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/rtstruct/plan_rtstruct.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" },
+      "imageSmoothingEnabled": false
+    },
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/preprocessed/MR_fu1_registered.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" }
+    },
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/rtstruct/fu1_rtstruct.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" },
+      "imageSmoothingEnabled": false
+    },
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/preprocessed/MR_fu2_registered.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" }
+    },
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/rtstruct/fu2_rtstruct.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" },
+      "imageSmoothingEnabled": false
+    },
+    {
+      "dataID": "rationai/mmci/NU22-03-00159/dose/plan_dose.nii",
+      "protocol": "wsi_service",
+      "options": { "plugin": "nifti", "format": "png" },
+      "imageSmoothingEnabled": false
+    }
+  ],
+  "background": [
+    { "id": "plan", "name": "Plan", "dataReference": 0, "visualizationIndex": 0 },
+    { "id": "fu1", "name": "Follow-up 1", "dataReference": 2, "visualizationIndex": 1 },
+    { "id": "fu2", "name": "Follow-up 2", "dataReference": 4, "visualizationIndex": 2 }
+  ],
+  "visualizations": [
+    {
+      "name": "Plan",
+      "shaders": {
+        "dose": {
+          "type": "heatmap",
+          "name": "Dose",
+          "visible": 1,
+          "fixed": true,
+          "dataReferences": [6, 0],
+          "params": { "color": "#ff8c00", "threshold": 2.0, "inverse": false }
+        },
+        "rtstruct": {
+          "type": "colormap",
+          "name": "Organs at risk",
+          "visible": 1,
+          "fixed": true,
+          "dataReferences": [1, 0],
+          "params": { "color": "#0066ff", "threshold": 0.5, "inverse": false }
+        }
+      },
+      "order": ["dose", "rtstruct"]
+    },
+    {
+      "name": "Follow-up 1",
+      "shaders": {
+        "dose": {
+          "type": "heatmap",
+          "name": "Dose",
+          "visible": 1,
+          "fixed": true,
+          "dataReferences": [6, 2],
+          "params": { "color": "#ff8c00", "threshold": 2.0, "inverse": false }
+        },
+        "rtstruct": {
+          "type": "colormap",
+          "name": "Organs at risk",
+          "visible": 1,
+          "fixed": true,
+          "dataReferences": [3, 2],
+          "params": { "color": "#0066ff", "threshold": 0.5, "inverse": false }
+        }
+      },
+      "order": ["dose", "rtstruct"]
+    },
+    {
+      "name": "Follow-up 2",
+      "shaders": {
+        "dose": {
+          "type": "heatmap",
+          "name": "Dose",
+          "visible": 0,
+          "fixed": true,
+          "dataReferences": [6, 4],
+          "params": { "color": "#ff8c00", "threshold": 2.0, "inverse": false }
+        },
+        "rtstruct": {
+          "type": "colormap",
+          "name": "Organs at risk",
+          "visible": 1,
+          "fixed": true,
+          "dataReferences": [5, 4],
+          "params": { "color": "#0066ff", "threshold": 0.5, "inverse": false }
+        }
+      },
+      "order": ["dose", "rtstruct"]
+    }
+  ]
+}

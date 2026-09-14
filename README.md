@@ -1,0 +1,420 @@
+# ReportFast
+
+Static HTML reports for whole slide images. A report is a file of cards and
+tables; every card links into the [xOpat](https://xopat.rationai.cloud.trusted.e-infra.cz/v3/)
+v3 viewer with the session carried in the URL fragment. Nothing is served, no
+JavaScript runs in the report, and the file can be mailed.
+
+Everything is built on one object. `XopatSession` holds the session document the
+viewer boots from — the same JSON your colleague pastes into chat — and turns it
+into a link. The rest of the tool is optional: components that put sessions on a
+page, and defaults for people who just have paths.
+
+```bash
+uv sync --extra all
+uv run reportfast plan  manifests/dysplasia.yaml   # writes nothing; read this first
+uv run reportfast build manifests/dysplasia.yaml   # one HTML file, then probes
+xdg-open reports/dysplasia.html
+```
+
+`manifests/dysplasia.yaml` resolves against this cluster's mount and its MLflow
+runs, so those two lines work here and nowhere else. To point the tool at your own
+data, copy `manifests/example.yaml` and edit four things — `title:`, the
+background path, one mask path, a colour. `plan` exits 1 and names the key if a
+path is wrong, so copying it and running `plan` is the whole tutorial.
+
+## The command line
+
+Three commands, three different blast radii. `reportfast` is installed by the
+package (`uv sync --extra manifest` is enough for local folders); `uv run
+reportfast …` works in this checkout.
+
+```bash
+reportfast plan  reports/foo.yaml              # resolve and report; writes nothing
+reportfast build reports/foo.yaml              # write the HTML, then probe every DataID
+reportfast build reports/foo.yaml --publish    # the only write to MLflow
+reportfast find  <run-id> --path tile_masks    # list what a run's artifacts hold
+```
+
+`plan` is the artifact worth reading before a build: cases per layer, layers per
+case, files per source, what `min_layers:` dropped, and every warning. It cannot
+write — there is no flag that makes it. `build` writes one file and then asks the
+tile server about every DataID in it, because a report whose links were never
+resolved is a report nobody has checked: the viewer loads, the card is black, and
+nothing anywhere reports an error. Publishing is `--publish` and nothing else —
+not a `publish:` key in the manifest, not CI — and it repeats the run id back
+before uploading.
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | fine |
+| `1` | the manifest is wrong: a bad key, a missing case, a layer that lands on nothing |
+| `2` | the HTML was written and a DataID did not resolve |
+| `3` | an optional extra this command needs is not installed |
+| `4` | nothing to work on: no such manifest, no such run, no command, bad flag |
+
+1 and 2 are different failures with different fixes — one is a line in a YAML
+file, the other is a run id or a mount that is wrong — so they do not share a
+code, and neither is argparse's default 2.
+
+Endpoint flags work on `plan` and `build` (`--base-url`, `--wsi-base-url`,
+`--image-protocol`, `--mount-root`) and beat both the manifest's `endpoint:` and
+the environment, which is what lets one manifest be aimed at a second deployment
+without editing it. `build` takes `-o/--out`, `--no-check`, `--check-only`
+(probe, write nothing) and `--run` (publish somewhere other than the manifest's
+`publish:`).
+
+## Three ways in
+
+The CLI is the same machinery as these three calls; a manifest is
+`build_report()` written down. Read [manifest.py](report_fast/manifest.py) for
+the vocabulary and `manifests/example.yaml` for a file to copy.
+
+**Just paths.** Backgrounds in, report out:
+
+```python
+from report_fast import build_report
+
+build_report(
+    ["/mnt/data/slides/case_001.tif", "/mnt/data/slides/case_002.tif"],
+    masks=["/mnt/data/masks/tumor.tif"],          # over every slide
+    title="QC",
+    out="report.html",
+)
+```
+
+**Named overlays, wherever they live.** A background, then the masks over it —
+from a mounted folder or from the artifacts of an MLflow run. This is the shape
+of a real analysis job, and the shape the original tool's Hydra config had:
+
+```python
+from report_fast import Drive, Mask, MlflowRun, build_report
+
+build_report(
+    background=Drive("/mnt/data/IKEM/colon/IBD_AI/dysplasia"),
+    masks=[
+        Mask("Tissue", MlflowRun("97084241311949189445f864d42e9d4e", "tissue_masks"),
+             color="#ffff00", opacity=0.5),
+        Mask("Annotations", MlflowRun("41d5e1d7d43641ea8f645f9b7945e9f7", "annot_masks"),
+             classes=3, palette=["#ffffff", "#ff0000", "#00ff00"],
+             breaks=[0.25, 0.75], mask=[0, 1, 1]),       # class 0 stays clear
+        Mask("epithelium", Drive("/mnt/projects/.../epithelium_masks/downscale"),
+             visible=True),
+    ],
+    only=["1094_18_HE_0", "8625_13_HE_A"],   # the cases, in report order
+    min_layers=3,                            # fewer overlays: not a finding
+    title="Dysplasia report",
+    out="report.html",
+)
+```
+
+Each mask is one file per case, matched to its slide by stem (`case_001.svs`
+and `case_001.tiff` are the same case), and becomes the DataID the tile server
+addresses — nothing is read or downloaded. `MlflowRun` is the only part that
+needs the extra (`uv sync --extra mlflow`, see [Runs in MLflow](#runs-in-mlflow)).
+`scripts/dysplasia_tile_masks.py` is that call as Python, run for real;
+`manifests/dysplasia.yaml` is the same report as a YAML file, and the two are
+kept in step deliberately — the manifest is what a person can diff and correct.
+
+**Your own session.** Whatever the tool does not model, you write:
+
+```python
+from report_fast import SlideCard, XopatSession
+
+session = XopatSession.from_url("https://xopat…/v3/#%7B…%7D")   # a pasted link
+session = XopatSession.from_file("my_session.json")             # a pasted file
+session = XopatSession.from_config({"data": [...], "background": [...]})
+
+SlideCard(session).to_html()
+```
+
+Both paths end at the same `XopatSession`, so code you write yourself and code
+that goes through this package emit the same links.
+
+## The base object
+
+```python
+from report_fast import XopatSession
+
+session = XopatSession.from_slide(
+    "/mnt/data/slides/case_001.tif",                  # the background
+    [{"path": "/mnt/data/masks/prob.tif", "name": "Probability", "type": "heatmap"}],
+    name="case_001",
+)
+session.url()          # https://…/v3/#%7B"data":…%7D
+session.thumbnail()    # the tile server's thumbnail for that slide
+session.to_json()      # the session itself
+```
+
+Two invariants hold everywhere in the package:
+
+- **A config that arrives is a config that leaves.** Importing a session keeps
+  fields this tool has never heard of, in the order they came. The paste path
+  exists so you are not limited by the tool; normalising away what we do not
+  model would defeat it. Only viewer navigation state (`params.viewport`,
+  `activeBackgroundIndex`) is dropped, and `drop_state=False` keeps even that.
+- **Indices are the tool's job.** `data[]` is a positional pool and
+  `background[].dataReference` / `shaders[].dataReferences` index into it.
+  Appending a second session renumbers its references; nothing you build by
+  hand can point at the wrong tile.
+
+A session is **one viewer instance**, not one slide: it may carry several
+backgrounds (timepoints, stains, channels) that the reader switches between. Say
+*session*, not *slide*.
+
+```python
+plan = XopatSession.from_slide("case/plan.nii", layers, name="Plan")
+followup = XopatSession.from_slide("case/fu.nii", layers, name="Follow-up")
+plan.merge(followup)                       # one session, two backgrounds
+```
+
+### Many slides at once
+
+```python
+from report_fast import SessionTemplate, sessions_from_folder
+
+sessions = sessions_from_folder("/mnt/data/slides", masks=["/mnt/data/masks/x.tif"])
+
+# Or reuse a session somebody pasted, refilling only its data:
+template = SessionTemplate.from_config(json.loads(pasted), slots={0: "slide", 1: "mask"})
+session = template.bind(name="case_001", slide="case_001.tif", mask="prob_001.tif")
+```
+
+`bind` replaces the `dataID` at each slot and keeps the protocol, tile options
+and shader config written around it, so a hand-authored session becomes a form
+with the paths as blanks.
+
+## The report
+
+```python
+from report_fast import Chart, MetricTable, Prose, Report, SlideGrid
+
+report = Report(title="TNBC dysplasia screen", subtitle="12 tiles")
+report.add(Prose(text="Screens run overnight; overlays are the model's."))
+report.add(SlideGrid(sessions, collapsible=True))
+report.add(MetricTable({"dice": 0.83, "tiles": 12}))
+report.add(Chart.from_matplotlib(fig))
+report.write("report.html")
+```
+
+Components in the box: `Prose`, `Heading`, `Bullets`, `LinkList`, `RawHtml`,
+`SlideCard`, `SlideGrid`, `MetricTable`, `Chart`, and `Section` for grouping.
+They take sessions and plain data — no database, no metric store, no slide
+reader. Collapsing is `<details>`; the only interactivity is the viewer behind
+the link.
+
+Your own component is a subclass with two methods:
+
+```python
+from fasthtml.common import Div
+from report_fast import BaseComponent
+
+class Finding(BaseComponent):
+    component_type = "finding"
+
+    def __init__(self, text, **kwargs):
+        super().__init__(**kwargs)
+        self.text = text
+
+    def css(self) -> str:                                  # inlined once, by the report
+        return ".rf-finding { color: #555; }"
+
+    def render(self):
+        return Div(self.text, cls="rf-finding", id=self.id)
+```
+
+Pick your own class prefix: `.rf-note`, `.rf-card` and the rest are already taken
+by the components in the box, and their stylesheets land on the same page.
+
+## Runs in MLflow
+
+`report_fast.mlflow` reads a run's artifacts and writes the report back into the
+run. It is optional — `uv sync --extra mlflow`, imported lazily, and everything
+else keeps working without it.
+
+```python
+from report_fast import Mlflow, build_report
+
+flow = Mlflow(tracking_uri="http://mlflow.rationai-mlflow:5000/")
+run = "5b72e2a73b3941f0be63e232d8072127"
+
+report = build_report(
+    title="Level 1 heatmaps",
+    slides=flow.slides(run, "heatmaps/epi0_negon"),   # DataIDs, not files
+    masks=flow.masks(run, "heatmaps/epi0_negoff"),    # paired with slides by file stem
+    metrics=flow.metrics(run),
+)
+print(flow.publish(report, run_id=run).url)           # uploads report/report.html
+```
+
+Nothing is downloaded. `list_artifacts` names the files and each becomes the
+DataID the tile server resolves — `mflow/<experiment>/<run>/artifacts/<path>` —
+which is exactly what `slides=` and a layer's `path` already take. Slides that
+live on a mount instead of in a run go in as usual, with `masks=flow.masks(run,
+"predictions")` putting that run's overlays onto them by file stem.
+
+`publish()` is the only call that writes. With `run_id=` it attaches the report
+to that run; without one it creates a run in `experiment_name=`, named,
+described and owned as the original tool's storer did, and returns
+`Published(run_id, artifact, url, created_run)`.
+
+The web URL is a **separate setting** from the tracking URI (`web_url=`,
+`MLFLOW_WEB_URL`): the API is usually reachable only inside the cluster, and the
+links in a report have to open in a browser. The extra is capped below mlflow 3
+because the tracking server here speaks the 2.x API — a 3.x client calls
+endpoints it does not have, and listing artifacts 404s.
+
+`uv run python scripts/test_mlflow.py` builds that report from the live run and
+uploads nothing unless you pass `--publish <run_id>`.
+
+## Deployment
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XOPAT_BASE_URL` | `https://xopat.rationai.cloud.trusted.e-infra.cz/v3/` | Viewer root the fragment is appended to |
+| `XOPAT_WSI_BASE_URL` | `https://xopat.rationai.cloud.trusted.e-infra.cz/wsi-service/` | Tile server answering `/v3/slides/…` (thumbnails) |
+| `XOPAT_IMAGE_PROTOCOL` | *unset* | Name of a `slide_protocols` entry for backgrounds; unset defers to the deployment default |
+| `XOPAT_MOUNT_ROOT` | `/mnt` | Prefix stripped from slide paths to form the DataID; `""` keeps them absolute |
+| `XOPAT_SESSION_CONFIG` | *unset* | JSON/TOML file of session defaults |
+| `MLFLOW_TRACKING_URI` | mlflow's own default | Tracking API runs are read from and written to |
+| `MLFLOW_WEB_URL` | `https://mlflow.rationai.cloud.trusted.e-infra.cz/` | Base of the run links inside a report |
+| `REPORTFAST_MLFLOW_ARTIFACT_PREFIX` | `mflow` | DataID namespace the deployment serves artifacts under |
+
+**The base path selects the viewer version.** This host serves v2 at `/xopat/`
+and v3 at `/v3/`; a v3 session opened by v2 *looks* like it loaded, so a wrong
+mount fails quietly rather than 404ing.
+
+Pass coordinates per call instead with `XopatEndpoint(base_url=…, wsi_base_url=…,
+image_protocol=…, mount_root=…)`.
+
+Slide paths are shared state: the machine building the report and the tile server
+must see the same file under the mount root, because a session names slides by
+path, never by bytes.
+
+### Defaults you can edit without touching Python
+
+`XOPAT_SESSION_CONFIG` points at a session-shaped file merged under everything:
+
+```json
+{
+  "params": {"theme": "dark", "ui": {"toolBar": true}},
+  "layers": [{"type": "colormap", "params": {"opacity": 0.5}}],
+  "protocol": "wsi_service",
+  "options": {"format": "png"},
+  "endpoint": {"base_url": "https://other.host/v3/", "mount_root": "/data"}
+}
+```
+
+Precedence is **builtin → preset → pasted config → arguments**. A preset cannot
+carry `data`, `background` or `visualizations`: those are the per-slide content
+a preset would silently rewire into the wrong indices. Pass `preset=` for one
+call.
+
+`sessionName` is the viewer's persistence namespace, not a title — slides
+sharing one also share their saved zoom and pan. Leave it unset and the viewer
+derives one per slide.
+
+## Layout
+
+```
+report_fast/
+├── xopat.py        wire format: endpoint, DataIDs, thumbnails, session → URL
+├── session.py      XopatSession, SessionTemplate, sessions_from_folder/paths
+├── config.py       SessionPreset, the environment preset file
+├── shader.py       layer types and their parameters, as v3 declares them
+├── masks.py        Mask + where its files come from: Drive, MlflowRun
+├── core.py         BaseComponent, ComponentRegistry, Report, Section
+├── build.py        build_report(): paths or masks → report, in one call
+├── manifest.py     YAML spec → build_report: strict keys, plan, resolve
+├── verify.py       every DataID → the tile server's /info, before a reader does
+├── mlflow.py       runs: artifacts → DataIDs, report → run (needs the extra)
+├── __main__.py     `reportfast plan | build | find`, and their exit codes
+└── components/     prose.py · slide_grid.py · metrics.py · chart.py
+manifests/          the reports themselves, as YAML: dysplasia.yaml, example.yaml
+skills/reportfast/  the agent's half: SKILL.md, references/, an example manifest
+examples/           session fixtures: a real viewer export + pasteable demos
+tests/              test_xopat.py · test_session.py · test_masks.py ·
+                    test_components.py · test_mlflow.py · test_manifest.py ·
+                    test_verify.py · test_cli.py
+scripts/            test_report.py, test_mlflow.py, dysplasia_tile_masks.py —
+                    demos writing the reports below
+reports/            generated HTML, one per manifest plus the demos
+                    (generated, regenerate freely)
+```
+
+`xopat.py`, `session.py` and `config.py` are stdlib-only: a script that just
+needs links imports nothing heavy and reads no slides.
+
+## Tests
+
+```bash
+uv run python tests/test_xopat.py         # wire format: session shape, URL round-trip
+uv run python tests/test_session.py       # the base object: paste path, indices, presets
+uv run python tests/test_masks.py         # backgrounds and masks, from a folder or a run
+uv run python tests/test_components.py    # the shell and the components
+uv run python tests/test_mlflow.py        # runs in/out, against a fake client
+uv run python tests/test_manifest.py      # YAML: strict keys, the plan, the three doors
+uv run python tests/test_verify.py        # the probe: DataIDs read back, three answers
+uv run python tests/test_cli.py           # the commands, and what each exit code means
+uv run pytest tests
+uv run ruff check .
+```
+
+Every file is also a script — `python tests/test_cli.py` runs it with no pytest
+installed. None of them reach a server: the run side is driven through a double
+and the probe by stubbing the socket, so a green suite says nothing about whether
+your tile server is up. It needs no mount and opens no slide.
+
+Two properties are pinned rather than hoped for:
+
+- **Reproducibility.** `build(x.yaml)` twice writes byte-identical HTML — no
+  timestamps, no generated code, fixed key order, and component ids derived from
+  position rather than from a uuid. That is what lets a report be a build artifact
+  you can diff against last week's, instead of a transcript nobody can check.
+- **Publishing is never a side effect.** A manifest's `publish:` key is a
+  destination, not an instruction; the tests assert that a build with a `publish:`
+  and no `--publish` uploads nothing, and that `--publish` without a run id stops
+  before it sends anything.
+
+The suites pin the emitted session against what xOpat 3 actually parses — the
+`params` allowlist, plural `dataReferences`, the palette/`threshold.breaks`
+coupling, fragment round-trip — and against what it does *not* do: drop unknown
+params silently, ignore inline-JS protocols, read a singular `dataReference`.
+
+`scripts/test_report.py` and `scripts/test_mlflow.py` are demos, not tests —
+`testpaths` keeps them out of `pytest`'s way. The first writes the two reports
+into `reports/` against the slide directories named at the top, and falls back
+to paths that do not exist where those mounts are absent — the report still
+builds, because a session is a DataID string, not an opened file. The second
+reads a real run out of MLflow and uploads nothing unless you pass
+`--publish <run_id>`.
+
+`scripts/dysplasia_tile_masks.py` and `manifests/dysplasia.yaml` are the same
+thing as a real job: the report the original tool built from
+`/home/jovyan/report/report/conf/dysplasia_tile_masks.yaml`, rebuilt from its
+`mask_retrievers` in order with the same colours and opacities — 32 cases, eleven
+overlays each, out of four MLflow runs and two mounted folders. The manifest is
+the one to edit; `plan` reports the real coverage on it today (the annotations
+layer reaches 21 of 32 cases, which is a fact about the data, not a bug).
+
+`tests/test_mlflow.py` drives a double through `client=`, so the suite needs no
+mlflow installed. That also means the real upload is not covered here: the first
+time you point `publish()` at a server you have not used before, send it to a
+store you own (`tracking_uri="file:/tmp/store"`) and read the artifact back with
+`download()` — a 200 on `log_artifact` and a file the tile server can resolve are
+different claims.
+
+## v2 → v3
+
+| v2 | v3 |
+| --- | --- |
+| `…/redirect.php?visualization=<json>` | `…/v3/#<urlencoded json>` (`redirect.php` was deleted upstream) |
+| `dataReference: 0` on a shader layer | `dataReferences: [0]` — the singular key is ignored |
+| `lossless: true` on a visualization | `{"dataID": "…", "options": {"format": "png"}}` on that layer's `data[]` entry |
+| `params.toolBar` | `params.ui.toolBar` (the flat spelling still works, deprecated) |
+| `classify` / `segmentation` / `bounding_box` | `colormap` / `colormap` / `iconmap` |
+| inline JS protocol template | the **name** of an entry in the deployment's `slide_protocols` |
+| `viewer.addLayer(...)` JS init | `visualizations[].shaders` |
+
+Unknown params, retired layer types and dangling references raise `XopatError`
+(or warn) at build time rather than failing in the browser.

@@ -1,0 +1,75 @@
+{
+  "params": {
+    "sessionName": "TNBC-BF-1-PNG_0",
+    "bypassCookies": true,
+    "theme": "auto",
+    "activeBackgroundIndex": [0],
+    "bypassCacheLoadTime": true,
+    "viewport": {
+      "zoomLevel": 2.4,
+      "point": { "x": 0.41, "y": 0.58 },
+      "rotation": 0
+    }
+  },
+  "data": [
+    {
+      "dataID": "projects/epithelium_segmentation/breast/TNBC/tif/ce/TNBC-BF-1-PNG_0.tif",
+      "protocol": "wsi_service"
+    },
+    {
+      "dataID": "projects/epithelium_segmentation/breast/TNBC/tif/dysplasia/viz/poly/TNBC-BF-1-PNG_0.tif",
+      "protocol": "wsi_service",
+      "options": { "format": "png" },
+      "imageSmoothingEnabled": false
+    },
+    {
+      "dataID": "projects/epithelium_segmentation/breast/TNBC/tif/he/TNBC-BF-1-PNG_0.tif",
+      "protocol": "wsi_service"
+    }
+  ],
+  "background": [
+    {
+      "id": "Kp0mZq2LcVf1",
+      "name": "TNBC-BF-1-PNG_0 · CE",
+      "dataReference": 0,
+      "visualizationIndex": 0,
+      "lossless": false
+    },
+    {
+      "id": "b7RnQe9XsTy3",
+      "name": "TNBC-BF-1-PNG_0 · H&E",
+      "dataReference": 2,
+      "visualizationIndex": null,
+      "lossless": false,
+      "shaders": [
+        {
+          "type": "identity",
+          "cache": { "use_channel0": "rgba", "opacity": 1 },
+          "params": {},
+          "visible": 1
+        }
+      ]
+    }
+  ],
+  "visualizations": [
+    {
+      "name": "TNBC-BF-1-PNG_0 · CE",
+      "order": ["dysplasia-polygons"],
+      "shaders": {
+        "dysplasia-polygons": {
+          "type": "colormap",
+          "name": "Dysplasia polygons",
+          "visible": 1,
+          "fixed": false,
+          "dataReferences": [1],
+          "params": { "opacity": 0.6 }
+        }
+      }
+    },
+    {
+      "name": "TNBC-BF-1-PNG_0 · H&E",
+      "shaders": {}
+    }
+  ],
+  "plugins": { "slide-info": {} }
+}

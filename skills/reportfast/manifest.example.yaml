@@ -1,0 +1,143 @@
+# Every block type the manifest can say, in one file.
+#
+#     reportfast plan  skills/reportfast/manifest.example.yaml
+#
+# This is the reference card for the vocabulary, not a report to build: the paths
+# point at folders that may not exist on your machine. For a manifest to copy and
+# edit, start at `manifests/example.yaml` in the repo; for one that resolves
+# against real data, `manifests/dysplasia.yaml`.
+#
+# The shape of a report: a grid of cards (one per case, from `background:` +
+# `masks:`) plus `blocks:` around it. Blocks render in order, before and after the
+# grid, so `intro:` is the top of the page and the last block is what the reader
+# ends on.
+
+title: Every block
+subtitle: the manifest vocabulary in one file
+out: ../reports/blocks.html
+
+# ── the cases ───────────────────────────────────────────────────────────────
+# A background is a folder (drive:), a folder of someone's choosing (dir: is the
+# same thing under its other name), a Python source (python: pkg.module:fn), or
+# an MLflow run (run: + path:). Same four options on every mask row.
+background:
+  drive: /mnt/data/example/slides
+
+masks:
+  # A heatmap: one color, one file per case.
+  - {name: Tissue, drive: /mnt/data/example/tissue, color: "#ffff00", opacity: 0.5}
+
+  # A class map: `classes` distinct values, `palette` naming them, `breaks`
+  # between them. `mask` is one flag per class -- 0 hides that class, which is how
+  # you drop the background label of a label image without editing the file.
+  - name: Annotations
+    drive: /mnt/data/example/annot
+    classes: 3
+    palette: ["#ffffff", "#ff0000", "#00ff00"]
+    breaks: [0.25, 0.75]
+    mask: [0, 1, 1]
+
+  # Door one: v3 shader fields the library does not model. `params:` passes them
+  # to the viewer verbatim -- the library checks its own keys strictly and the
+  # viewer's loosely, so a field that only exists in a newer viewer still arrives.
+  # Use this rather than forking the library; if it works, it is a candidate for a
+  # real key.
+  - name: Custom colormap
+    drive: /mnt/data/example/annot
+    params:
+      type: custom_colormap
+      colormap: {type: gradient, stops: ["#000000", "#ffffff"]}
+
+# ── the page ────────────────────────────────────────────────────────────────
+# `intro:` is prose at the very top. Everything else is `blocks:`, in order.
+intro: >-
+  What this report is for, in the reader's terms. Two or three sentences: the
+  cards carry the images, and this is the only place the report can say what to
+  look at or what was excluded.
+
+blocks:
+  # Text. A string, or a list of strings for separate paragraphs; a value ending
+  # in .md is read from that file, relative to the manifest.
+  - prose:
+      - First paragraph.
+      - Second paragraph. Markdown works -- *this* is italic.
+
+  # A heading. Level after the pipe; omit it for 2.
+  - heading: Per-case metrics|3
+
+  # A bulleted list, for the four things a reader should notice.
+  - bullets:
+      - Tissue coverage is what tells you a slide was scanned properly.
+      - Blur is per-pixel, so a slide can be half sharp.
+
+  # Links out. The viewer link on every card is built in; these are for the
+  # run, the protocol document, the next report in the series.
+  - links:
+      MLflow run: https://mlflow.example/#/jobs/1/runs/e313fc2a62d54057b41b46057577c75d
+      Annotation protocol: https://example.test/protocol
+
+  # A metrics table: literal rows, or read off a run at build time. The table is
+  # static HTML -- a run's metrics, as of the build, which is the point of a
+  # report: it says what was true then.
+  - metrics:
+      from_run: e313fc2a62d54057b41b46057577c75d
+  - metrics:
+      - [Accuracy, 0.91]
+      - [Slides, 32]
+
+  # An image the report points at -- a training curve, a QC distribution. A path
+  # relative to the manifest, so the file has to travel with the HTML or be a URL.
+  - chart:
+      image: ../figures/blur_distribution.png
+      caption: Blur score across all 378 slides
+
+  # A group with a title, for a long report: the section headers are navigable and
+  # the reader can see where they are.
+  - section:
+      title: Quality control
+      blocks:
+        - heading: What failed
+        - prose: Nothing, this week.
+
+  # The escape hatch, for the one table FastHTML cannot express. This is the least
+  # portable thing in the manifest and the reason it is last: exhaust the types
+  # above first.
+  - raw_html: <p class="note">Rendered verbatim.</p>
+
+# ── the rest of the top-level keys ──────────────────────────────────────────
+# Not used above because they are situational; all are checked the same strict way.
+#
+# only:            the case stems this report is about (else: every file)
+# min_layers:      drop a case with fewer overlays than this
+# params:          viewer session params, deep-merged over the built-in defaults
+# preset:          a config file of your own, merged under kwargs -- the way to
+#                  share a house style across reports without editing the library
+# metrics: / charts:  run metrics and chart images, surfaced as blocks
+# endpoint:        base_url / wsi_base_url / image_protocol / mount_root
+# flow:            tracking_uri / web_url / artifact_prefix
+# publish:         the run --publish uploads to. No key makes publishing happen.
+#
+# And the three doors, for a v3 feature with no key yet:
+#
+# sessions:        whole exported sessions, pasted or from a file or a URL --
+#                  an ALTERNATIVE to background:, not an addition to it; a
+#                  manifest with both is rejected, because one of the two would
+#                  silently never render.
+#   - from_config: {params: {...}, data: [...], ...}
+#   - from_file:   exports/case_001.json
+#   - from_url:    https://viewer.example/v3/#%7B...%7D
+# sessions_from:   a function of yours returning sessions
+#   my_project.sessions:build
+# params:          on a mask row -- raw viewer fields, see above
+#
+# Door two, uncommented, in a manifest with no background: of its own --
+# the file a colleague exported by hand, kept exactly as they saved it:
+#
+# title: Hand-checked cases
+# sessions:
+#   - from_file: ../exports/handmade_case.json
+#   - from_url: https://viewer.example/v3/#%7B%22data%22%3A%5B...%5D%7D
+#
+# Door three, when the cases come from somewhere the library cannot list at all:
+#
+# sessions_from: my_project.sessions:build

@@ -1,0 +1,49 @@
+{
+  "params": {
+    "bypassCookies": true,
+    "theme": "auto",
+    "activeBackgroundIndex": [0],
+    "bypassCacheLoadTime": true,
+    "viewport": {
+      "zoomLevel": 1.0,
+      "point": { "x": 0.5, "y": 0.5 },
+      "rotation": 0
+    }
+  },
+  "data": [
+    {
+      "dataID": "/data/Public/Public/breast/BreastCancerSummerSchool/Slides/O16-11870.tiff",
+      "protocol": "iipimage"
+    },
+    {
+      "dataID": "/data/Public/Public/breast/BreastCancerSummerSchool/Slides/O16-11870.tiff",
+      "protocol": "iipimage"
+    },
+    {
+      "dataID": "/data/Public/Public/breast/BreastCancerSummerSchool/Slides/O16-11870.tiff",
+      "protocol": "iipimage"
+    },
+    {
+      "dataID": "/data/Public/Public/breast/BreastCancerSummerSchool/Slides/O16-11870.tiff",
+      "protocol": "iipimage"
+    }
+  ],
+  "background": [
+    {
+      "visualizationIndex": null,
+      "lossless": false,
+      "id": "QcFKATZIt-Js",
+      "dataReference": 3,
+      "shaders": [
+        {
+          "type": "identity",
+          "cache": { "use_channel0": "rgba", "opacity": 1 },
+          "params": {},
+          "visible": 1
+        }
+      ]
+    }
+  ],
+  "visualizations": [],
+  "plugins": { "slide-info": {} }
+}
