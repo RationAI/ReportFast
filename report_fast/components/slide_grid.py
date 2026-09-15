@@ -186,8 +186,18 @@ class SlideCard(BaseComponent):
         )
         if layers:
             parts.append(f"{layers} layers")
+        # A count, not the keys. This line used to render the literal string
+        # "slide-info" on every card of a real report: a plugin id from the session
+        # schema, which tells a reader nothing about the slide and exposes a name
+        # from the wire format where a person expects prose. The number stays
+        # because plugins are loaded on boot and can change what a card looks like,
+        # which is worth knowing when one renders oddly. The names themselves are
+        # in the session JSON, and no label table for them lives here -- the
+        # contract derives only "plugin id -> options", so a hand-typed mapping
+        # would be a second source of truth, which is what `derive_schema.py --check`
+        # exists to make impossible.
         if session.plugins:
-            parts.append(", ".join(sorted(session.plugins)))
+            parts.append(f"{len(session.plugins)} plugins")
         return " · ".join(parts)
 
     def _session_details(self) -> List[FT]:

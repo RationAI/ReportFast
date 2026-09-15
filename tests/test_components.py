@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import sys
 import tempfile
 import urllib.parse
@@ -225,6 +226,42 @@ def test_card_can_drop_the_thumbnail_and_the_json():
     assert "Open in xOpat" in html, "the link is the point of the card"
 
 
+def test_the_meta_line_counts_plugins_rather_than_naming_them():
+    """The caption line is for a reader; the session JSON is for a machine.
+
+    A real report rendered the literal string "slide-info" under all 159 cards --
+    the plugin key from the session schema, surfaced where a person reads. The count
+    is kept because plugins load on boot and can change what a card draws; the key
+    is not, because it is a wire-format name and there is no label for it to become
+    (the contract derives only "plugin id -> options", and a hand-typed table would
+    be a second source of truth).
+    """
+    configured = XopatSession.from_config(
+        {
+            "data": [{"dataID": "case_001.tif", "protocol": "wsi_service"}],
+            "background": [{"id": "b", "name": "case_001", "dataReference": 0}],
+            "visualizations": [],
+            "plugins": {"slide-info": {}, "annotations": {}},
+        },
+        endpoint=endpoint(),
+    )
+    html = to_xml(SlideCard(configured, thumbnails=False, show_session=False).render())
+    assert "2 plugins" in html, html
+    # Scoped to the caption line on purpose: the fragment in `href` carries the
+    # whole session *including* its plugins, and it must -- that is the payload.
+    # The complaint was the key surfacing where a person reads, not its presence
+    # in the page.
+    meta = re.search(r'<span class="rf-meta">([^<]*)</span>', html)
+    assert meta and "slide-info" not in meta.group(1), meta and meta.group(1)
+    assert "slide-info" in html, "the session the link carries is unchanged"
+
+    plain = to_xml(SlideCard(session(), thumbnails=False, show_session=False).render())
+    plain_meta = re.search(r'<span class="rf-meta">([^<]*)</span>', plain)
+    assert "plugins" not in (plain_meta.group(1) if plain_meta else ""), (
+        "a session with no plugins should say nothing about them"
+    )
+
+
 def test_card_embeds_the_viewer_when_asked():
     html = to_xml(SlideCard(session(), embed=True).render())
     assert "<iframe" in html
@@ -253,7 +290,6 @@ def test_no_element_id_appears_twice_in_a_page():
     lived in the *wrapper*, so no component's own output looked wrong.
     """
     import collections
-    import re
 
     report = Report(
         title="ids",
@@ -280,8 +316,6 @@ def test_a_block_that_renders_no_id_still_gets_its_anchor():
     no id on it. There the wrapper is the only element that can carry the anchor, so
     stamping it is required, not redundant.
     """
-    import re
-
     from report_fast.core import BaseComponent, _wrap
 
     class Boom(BaseComponent):
