@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 from contextlib import redirect_stderr, redirect_stdout
@@ -828,7 +829,7 @@ def test_publish_from_the_door_names_the_run_it_writes_to_or_refuses():
     )
 
 
-def test_a_door_publish_carries_no_local_html_and_still_uploads_the_record():
+def test_a_door_publish_refuses_to_promise_nothing_and_upload_something():
     """`--check-only --publish` is refused for the same reason on both doors: one
     flag promises nothing is written and the other writes to a server."""
     root = session_root()
@@ -837,6 +838,71 @@ def test_a_door_publish_carries_no_local_html_and_still_uploads_the_record():
         "--check-only", "--no-check", "--publish", "--run", "run-x",
     )
     assert code == 4 and "--check-only" in err, err
+
+
+def test_a_door_publish_without_o_goes_to_the_run_and_stays_there():
+    """`--run` named the destination; a local copy has to be asked for.
+
+    Run from an empty directory of its own, because the whole point is what is not
+    left in it. The report that leaked this way landed as `report.html` beside
+    whatever command preceded it, which is a file the caller never named.
+    """
+    root = session_root()
+    elsewhere = Path(tempfile.mkdtemp())
+    sent = []
+
+    def capture(self, report, run_id=None, extra_dir=None):
+        sent.append((run_id, report.to_html(), sorted(
+            path.name for path in Path(extra_dir).iterdir()
+        ) if extra_dir else []))
+        return Published(run_id=run_id, artifact="report/report.html", url="u")
+
+    real = mlflow_module.Mlflow.publish
+    mlflow_module.Mlflow.publish = capture
+    before = set(elsewhere.iterdir())
+    cwd = Path.cwd()
+    try:
+        os.chdir(elsewhere)
+        code, printed, _ = run(
+            "build", "--sessions-dir", str(root / "sessions"),
+            "--no-check", "--publish", "--run", "run-remote",
+        )
+    finally:
+        mlflow_module.Mlflow.publish = real
+        os.chdir(cwd)
+    assert code == 0, printed
+    (run_id, html, staged), = sent
+    assert run_id == "run-remote" and "<html" in html.lower()
+    assert staged == ["provenance.json"], "the run still gets its record"
+    assert set(elsewhere.iterdir()) == before, (
+        f"a publish wrote into the working directory: {set(elsewhere.iterdir()) - before}"
+    )
+    assert "wrote     the run only" in printed and "-o FILE" in printed
+    assert "--check-only" not in printed, (
+        "the line must not claim a flag that was never passed"
+    )
+    assert "published report/report.html on run run-remote" in printed
+
+
+def test_a_door_publish_with_o_keeps_the_local_copy_and_its_sidecar():
+    """`-o` is still the way to ask for both: the page and its sidecar here, the
+    page and its record there."""
+    root = session_root()
+    real = mlflow_module.Mlflow.publish
+    mlflow_module.Mlflow.publish = lambda self, report, run_id=None, extra_dir=None: (
+        Published(run_id=run_id, artifact="report/report.html", url="u")
+    )
+    try:
+        code, printed, _ = run(
+            "build", "--sessions-dir", str(root / "sessions"),
+            "-o", str(root / "both.html"), "--no-check", "--publish", "--run", "run-two",
+        )
+    finally:
+        mlflow_module.Mlflow.publish = real
+    assert code == 0, printed
+    assert (root / "both.html").exists() and (root / "both.provenance.json").exists()
+    assert f"wrote     {root / 'both.html'}" in printed
+    assert "the run only" not in printed
 
 
 def test_design_and_sessions_dir_are_two_questions_not_one_command():

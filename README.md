@@ -76,7 +76,7 @@ reportfast find  <run-id> --path tile_masks    # list what a run's artifacts hol
 # the same three gates, from authored sessions instead of a YAML file:
 reportfast plan  --design $D/design.json --slot 0=slide --slot 1=mask
 reportfast build --sessions-dir $D/sessions --title "Cohort QC" -o $D/report.html
-reportfast build --sessions-dir $D/sessions --publish --run RUN
+reportfast build --sessions-dir $D/sessions --publish --run RUN   # page on the run only
 reportfast build --sessions-dir $D/sessions --emit-manifest   # print, never write
 ```
 
@@ -341,6 +341,12 @@ provenance**. The page looks identical whether or not anyone is keeping records
 (that is tested, byte for byte). If a report must be self-explaining wherever it
 goes, deliver the pair, or keep a manifest. See
 [provenance.py](report_fast/provenance.py); both files are gitignored.
+
+Neither file appears when you did not ask for a local copy. `--publish` with no
+`-o` on a manifest-less build uploads the page and its record to the run and leaves
+the directory you ran it in alone — `--run` named the destination, so guessing a
+second one beside whatever command happened to precede it is not the tool's call.
+`-o` asks for both.
 
 ## Runs in MLflow
 

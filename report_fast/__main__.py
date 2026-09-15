@@ -75,7 +75,9 @@ would raise -- all of it before a byte of HTML exists."""
 
 BUILD_HELP = """Write the report, then probe every DataID against the image server.
 
-Publishing is a separate, explicit --publish. Building never uploads."""
+Publishing is a separate, explicit --publish. Building never uploads, and publishing
+never writes a local file it was not told where to write: a manifest-less build with
+--publish and no -o puts the page on the run and nowhere else."""
 
 FIND_HELP = """List the artifacts of a run you already have.
 
@@ -225,7 +227,9 @@ def _parser() -> argparse.ArgumentParser:
         "-o",
         "--out",
         default=None,
-        help="where to write; defaults to the manifest's out:, else beside it",
+        help="where to write; defaults to the manifest's out:, else beside it "
+             "(with --publish on a manifest-less build, nothing is written here "
+             "unless this is given)",
     )
     build.add_argument(
         "--no-check",
@@ -610,7 +614,7 @@ def _build_composition(args: argparse.Namespace) -> int:
 
     record = _record(args, composition)
     built = composition.build(
-        out=False if args.check_only else (args.out or _default_out(args)),
+        out=False if args.check_only else _door_out(args),
         check=not args.no_check,
         endpoint=_endpoint(args),
         provenance=record,
@@ -698,7 +702,16 @@ def _report_built(built) -> int:
         built.plan.out = built.out
     print(built.plan.to_text())
     print()
-    print(f"wrote     {built.out}" if built.out else "wrote     nothing (--check-only)")
+    if built.out:
+        written = f"wrote     {built.out}"
+    elif built.published is not None:
+        # Nothing here, but not because nothing was asked for: --run named the
+        # destination and the page is on it. Saying "--check-only" here would
+        # describe a flag that was never passed.
+        written = "wrote     the run only (-o FILE keeps a local copy as well)"
+    else:
+        written = "wrote     nothing (--check-only)"
+    print(written)
     if built.checks:
         verdict = summary(built.checks).splitlines()
         print(f"probe     {verdict[0]}")
@@ -796,11 +809,21 @@ def _endpoint_row(session) -> str:
     return f"{endpoint.base_url} (tiles {endpoint.wsi_base_url})"
 
 
-def _default_out(args: argparse.Namespace):
-    """Where a manifest-less report goes when `-o` is not given."""
+def _door_out(args: argparse.Namespace):
+    """Where a door build writes, or `False` for nowhere.
+
+    A plain build with no `-o` lands on `report.html` beside the command, which is
+    what the examples assume. A *published* build with no `-o` writes nothing here:
+    `--run` already named the destination, and a second copy in whatever directory
+    the caller happened to stand in is an intermediate nobody asked for -- the
+    project's own root had an untracked `report.html` from exactly that. `-o` still
+    asks for the local copy alongside the run's.
+    """
     from .compose import DEFAULT_OUT
 
-    return DEFAULT_OUT
+    if args.publish and not args.out:
+        return False
+    return args.out or DEFAULT_OUT
 
 
 def _announce_publish(args: argparse.Namespace) -> None:
