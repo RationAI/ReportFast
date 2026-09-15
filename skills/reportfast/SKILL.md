@@ -5,9 +5,10 @@ description: Build static HTML reports of xOpat v3 pathology sessions — you au
 
 <!-- STAMP — generated, do not hand-edit. These facts were derived from
      xOpat 3.1.0, commit 18c94f2 (2026-09-14), from report_fast/schema/viewer.lock.json.
-     Check it from anywhere:
-         uv run python -c 'from report_fast.contract import viewer_stamp as v; print(v())'
-     Refresh when the pinned viewer moves: uv run python scripts/derive_schema.py
+     Check it against the install you are using:
+         python -c 'from report_fast.contract import viewer_stamp as v; print(v())'
+     (uv run python … inside this repo). Refresh when the pinned viewer moves:
+     uv run python scripts/derive_schema.py — in the repo, never from an install.
      If the two disagree, the lock is right and this comment is stale.
 -->
 
@@ -227,14 +228,14 @@ Only what is not derivable from the code:
   how `/mnt/…` becomes a DataID, the `mflow/<experiment>/<run>/artifacts/…` prefix.
 - `references/hydra-v2-to-v3.md` — mapping an old Hydra config's
   `mask_retrievers` / `selected_items` / `min_layer_count` onto a report.
-- **the generated contract** — `report_fast/schema/` in the repo (four files: the
-  session schema, the `params` allowlist, every layer field, the viewer stamp).
-  Find it from anywhere with
-  `uv run python -c "from report_fast.contract import SCHEMA_DIR; print(SCHEMA_DIR)"`.
-  Read it before authoring a design; do not trust prose — including this file —
+- **the generated contract** — four files: the session schema, the `params`
+  allowlist, every layer field, the viewer stamp. Find them from your install with
+  `python -c "from report_fast.contract import SCHEMA_DIR; print(SCHEMA_DIR)"`.
+  Read them before authoring a design; do not trust prose — including this file —
   for a key name. `report_fast.contract` answers the same facts in Python
   (`accepted_param_keys()`, `shader_types()`, `layer_field_names()`, `viewer_stamp()`)
   — the version that cannot drift from the gate that uses it.
-- **golden sessions to imitate** — `examples/` in the repo, including the
-  multi-background case. Same one-liner, one directory up.
+- **golden sessions to imitate** — including the multi-background case. From an
+  install: `reportfast skill show --reference examples/dysplasia_case.json`; from a
+  checkout, the same files are in `examples/`.
 - `manifest.example.yaml` — every manifest block type, with comments.

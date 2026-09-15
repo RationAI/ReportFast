@@ -10,6 +10,37 @@ viewer boots from — the same JSON your colleague pastes into chat — and turn
 into a link. The rest of the tool is optional: components that put sessions on a
 page, and defaults for people who just have paths.
 
+## Install it in a project
+
+Not on PyPI. Two ways in, from a checkout of this repo or from git:
+
+```bash
+uv add --editable /path/to/reporting       # a local checkout you are also editing
+uv add "report-fast @ git+https://github.com/RationAI/reporting.git"   # or over git
+uv add 'report-fast[all] @ …'              # same, with the YAML and MLflow extras
+
+uv run reportfast skill install
+```
+
+That second command is the one that is easy to miss. Installing puts the library in
+the project's venv; it cannot put the **skill** — the procedure an agent follows —
+anywhere an agent looks, because installing is not allowed to write outside the
+environment it installs into. So the skill travels inside the package and one
+explicit command places it: in `~/.claude/skills` by default, or `--project` for
+`./.claude/skills` alone. `skill show` prints it without installing anything, and
+`skill where` answers why an agent did not use it.
+
+The `git+` form has not been tried from this machine (no push credentials, and the
+host is unreachable for git here); the local path form is what is exercised in the
+table below.
+
+| From a project that has it installed | Works |
+| --- | --- |
+| `uv run reportfast build --sessions-dir DIR -o r.html` | yes |
+| `python -c "import report_fast"` | yes |
+| `reportfast skill show --reference examples/dysplasia_case.json` | yes — the example sessions ship too |
+| `uv run python scripts/derive_schema.py` | **no**: re-deriving the contract is a repo step, needs a checkout |
+
 Two ways to use it, and the first is the default:
 
 **Ask.** You (or an agent) author one xOpat session document, the library validates
@@ -453,11 +484,12 @@ report_fast/
 ├── audit.py        one session → findings with JSON paths; the severity split
 ├── frozen.py       the ten components the page may be made of, and the gate
 ├── provenance.py   report.provenance.json: the record, never the page
+├── skill.py        the skill inside the wheel: find it, print it, place it
 ├── schema/         GENERATED from the pinned viewer: session schema, params
 │                   allowlist, layer fields, and the version stamp (viewer.lock.json)
 ├── verify.py       every DataID → the tile server's /info, before a reader does
 ├── mlflow.py       runs: artifacts → DataIDs, report → run (needs the extra)
-├── __main__.py     `reportfast plan | build | find`, both doors, and their codes
+├── __main__.py     `reportfast plan | build | find | skill`, doors and exit codes
 └── components/     prose.py · slide_grid.py · metrics.py · chart.py
 scripts/derive_schema.py  regenerate schema/ from the pinned xOpat checkout, and
                     refresh the version stamp in the skill
@@ -468,7 +500,7 @@ tests/              test_xopat.py · test_session.py · test_masks.py ·
                     test_components.py · test_mlflow.py · test_manifest.py ·
                     test_verify.py · test_cli.py · test_contract.py ·
                     test_audit.py · test_frozen.py · test_compose.py ·
-                    test_provenance.py
+                    test_provenance.py · test_skill.py
 scripts/            test_report.py, test_mlflow.py, dysplasia_tile_masks.py —
                     demos writing the reports below
 reports/            generated HTML, one per manifest plus the demos

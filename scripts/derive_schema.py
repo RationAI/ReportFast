@@ -1203,9 +1203,10 @@ def stamp_comment(lock: Dict[str, Any]) -> str:
         f"{STAMP_BEGIN} — generated, do not hand-edit. These facts were derived from\n"
         f"     xOpat {lock['version']}, commit {str(lock['commit'])[:7]} "
         f"({str(lock['derived_at'])[:10]}), from report_fast/schema/viewer.lock.json.\n"
-        f"     Check it from anywhere:\n"
-        "         uv run python -c 'from report_fast.contract import viewer_stamp as v; print(v())'\n"
-        f"     Refresh when the pinned viewer moves: uv run python scripts/derive_schema.py\n"
+        f"     Check it against the install you are using:\n"
+        "         python -c 'from report_fast.contract import viewer_stamp as v; print(v())'\n"
+        f"     (uv run python … inside this repo). Refresh when the pinned viewer moves:\n"
+        f"     uv run python scripts/derive_schema.py — in the repo, never from an install.\n"
         f"     If the two disagree, the lock is right and this comment is stale.\n"
         f"{STAMP_END}"
     )

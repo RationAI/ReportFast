@@ -1,4 +1,4 @@
-"""``reportfast plan | build | find`` — the three commands, and their three gates.
+"""``reportfast plan | build | find | skill`` — the commands, and the gates on them.
 
     reportfast plan  reports/dysplasia.yaml             # writes nothing
     reportfast build reports/dysplasia.yaml             # writes one HTML file
@@ -10,7 +10,11 @@ instead of a YAML file and persists nothing but the HTML:
 
     reportfast plan  --design /tmp/x/design.json --slot 0=slide --slot 1=mask
     reportfast build --sessions-dir /tmp/x/sessions -o /tmp/x/report.html
-    reportfast build --sessions-dir /tmp/x/sessions --publish --run RUN  # + sidecar
+    reportfast build --sessions-dir /tmp/x/sessions --publish --run RUN  # run only
+
+A published build with no ``-o`` writes nothing here: ``--run`` named the
+destination, and guessing a second one beside whatever directory the command stood
+in is not this tool's call. ``-o`` asks for the local copy as well as the run's.
 
 The split between them is the ruling that prompt mode entered through: **one**
 session design is hand-authored, the 300 instances come from a Python loop
@@ -35,6 +39,12 @@ manifest's ``publish:`` key, and names the run it is going to before it goes. Fr
 the manifest-less door it needs ``--run``, and what it logs in a manifest's place
 is the sidecar: with no declared spec, the record of what resolved *is* the
 configuration the run keeps.
+
+``skill`` is the fourth command and the odd one out: it neither reads a spec nor
+writes a report. The skill an agent follows ships inside this package, and
+installing a library is not allowed to place files outside its environment, so
+putting the procedure where an agent looks has to be its own asked-for command
+(:mod:`report_fast.skill`).
 
 Exit codes, for the CI job and the agent alike:
 
@@ -79,6 +89,14 @@ Publishing is a separate, explicit --publish. Building never uploads, and publis
 never writes a local file it was not told where to write: a manifest-less build with
 --publish and no -o puts the page on the run and nowhere else."""
 
+SKILL_HELP = """The procedure this version of the tool ships, and where an agent finds it.
+
+`uv add report-fast` puts the library in a project's venv; it cannot put the skill in
+a place Claude Code reads, because installing is not allowed to write outside the
+environment it is installing into. So the skill travels inside the package and this
+command places it: `reportfast skill install` once per machine, `--project` once per
+repository. `show` prints it without installing anything."""
+
 FIND_HELP = """List the artifacts of a run you already have.
 
 Not run discovery: nothing here searches MLflow, so a run id comes from the UI or
@@ -95,6 +113,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from .frozen import CompositionError
     from .manifest import ManifestError, ManifestNoYaml, ManifestNotFound
     from .mlflow import MlflowError
+    from .skill import SkillError
     from .xopat import XopatError
 
     try:
@@ -152,6 +171,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     except ManifestError as error:
         print(f"reportfast: {error}", file=sys.stderr)
         return 1
+    except SkillError as error:
+        # The skill is either not in this install (a build problem, exit 1) or
+        # already installed where it was asked to go (a flag problem, exit 4). The
+        # message says which, so the exit code is not the only clue.
+        print(f"reportfast: {error}", file=sys.stderr)
+        return USAGE_ERROR if "already holds" in str(error) else 1
+    except PermissionError as error:
+        # `skill install` writes into a directory the caller may not own -- ~/.claude
+        # on a shared machine, or a project's .claude checked out from someone else.
+        print(
+            f"reportfast: cannot write {error.filename}: permission denied. Name a "
+            "directory you can write with --dest DIR.",
+            file=sys.stderr,
+        )
+        return USAGE_ERROR
     except (FileNotFoundError, NotADirectoryError) as error:
         print(f"reportfast: {error}", file=sys.stderr)
         return USAGE_ERROR
@@ -296,6 +330,60 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_tracking(find)
     find.set_defaults(func=_find)
+
+    skill = commands.add_parser(
+        "skill", help="the agent procedure this install ships", description=SKILL_HELP
+    )
+    skill_actions = skill.add_subparsers(dest="skill_action", metavar="<action>")
+    show = skill_actions.add_parser("show", help="print SKILL.md")
+    show.add_argument(
+        "--reference",
+        default=None,
+        metavar="NAME",
+        help="print one file from references/ instead of SKILL.md",
+    )
+    show.set_defaults(func=_skill)
+    place = skill_actions.add_parser(
+        "install", help="put the skill where Claude Code looks for it"
+    )
+    place.add_argument(
+        "--project",
+        action="store_true",
+        help="install into ./.claude/skills for this project only, instead of ~/.claude/skills",
+    )
+    place.add_argument(
+        "--dest",
+        default=None,
+        metavar="DIR",
+        help="install under DIR instead of either default",
+    )
+    place.add_argument(
+        "--force",
+        action="store_true",
+        help="replace a skill that is already installed there",
+    )
+    place.add_argument(
+        "--link",
+        action="store_true",
+        help="symlink to the installed files, so a checkout edit is live at once",
+    )
+    place.set_defaults(func=_skill)
+    where = skill_actions.add_parser(
+        "where", help="say where the skill is and whether it is installed"
+    )
+    where.add_argument(
+        "--dest",
+        default=None,
+        metavar="DIR",
+        help="ask about DIR rather than the two default locations",
+    )
+    where.add_argument(
+        "--project",
+        action="store_true",
+        help="ask about ./.claude/skills only",
+    )
+    where.set_defaults(func=_skill)
+    skill.set_defaults(func=_skill)
     return parser
 
 
@@ -872,6 +960,56 @@ def _find(args: argparse.Namespace) -> int:
     print(
         "note      this lists a run you named; MLflow is not searchable from here."
     )
+    return 0
+
+
+def _skill(args: argparse.Namespace) -> int:
+    """`reportfast skill show | install | where`.
+
+    Read, write, and ask. `show` never touches the filesystem outside the package,
+    `install` writes exactly one directory and says so, and `where` is the question
+    asked after an agent did *not* use the skill.
+    """
+    from . import skill as skill_module
+
+    action = getattr(args, "skill_action", None)
+    if action is None:
+        print("reportfast: skill needs an action: show, install or where.", file=sys.stderr)
+        return USAGE_ERROR
+
+    if action == "show":
+        if getattr(args, "reference", None):
+            print(skill_module.reference(args.reference), end="")
+        else:
+            print(skill_module.skill_text(), end="")
+        return 0
+
+    if action == "where":
+        print(f"bundled   {skill_module.skill_dir()}")
+        dest = getattr(args, "dest", None)
+        installed = skill_module.find_installed(dest, project=getattr(args, "project", False))
+        project_target = skill_module.target_for(None, project=True)
+        if not installed:
+            asked = skill_module.target_for(dest, project=getattr(args, "project", False))
+            print(
+                f"installed nothing at {asked}. "
+                "`reportfast skill install` puts the skill where Claude Code looks."
+            )
+            return 0
+        for path in installed:
+            scope = "this project" if path == project_target else "every project"
+            if dest:
+                scope = "as asked"
+            print(f"installed {path}  ({scope})")
+        return 0
+
+    placed = skill_module.install(
+        args.dest, project=args.project, force=args.force, link=args.link
+    )
+    scope = args.dest or ("this project only" if args.project else "every project")
+    print(f"skill     {placed}  ({scope}, {'linked' if args.link else 'copied'})")
+    print(f"read      {placed / skill_module.SKILL_FILE}")
+    print("note      restart the session or run /skills for Claude Code to see it.")
     return 0
 
 

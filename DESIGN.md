@@ -378,12 +378,54 @@ manifest path) "used twice" is something you can actually grep for.
 ## Shipped next to the code: the skill
 
 The agent-facing half of the tool lives in `skills/reportfast/` in this repo, so
-the procedure, the viewer context, and the code version together. It is
-installed as an extension bundle; nothing in a project has to know this
-repository exists — the library arrives by `uv add report-fast`, the skill by
-`qwen extensions install`. The skill's layout (schema, examples, references) is
-in **The agent's context on xOpat** above; the tree below is the procedural
-half.
+the procedure, the viewer context, and the code version travel together.
+
+**It ships inside the wheel.** `pyproject.toml` force-includes `skills/reportfast/`
+as `report_fast/skill/` (and `examples/` as `report_fast/examples/`, since a
+procedure that says "copy an example" has to arrive with the example), and
+`report_fast/skill.py` finds it from either layout — the wheel path, or the
+checkout two directories up, which is what an editable install sees.
+
+Placing it is a separate, explicit command, and that is a packaging constraint
+rather than a design preference: an install is not allowed to write outside the
+environment it installs into, so no `uv add` can put a skill where an agent looks.
+
+```
+reportfast skill show                 # print it; touches nothing
+reportfast skill install              # -> ~/.claude/skills  (every project)
+reportfast skill install --project    # -> ./.claude/skills  (this one; gitignore it)
+reportfast skill where                # bundled path + what is installed; the "why
+                                      # didn't the agent use it" question
+reportfast skill show --reference examples/dysplasia_case.json
+```
+
+Personal is the default because the question an agent asks is rarely about one
+repository, and because a project install creates `.claude/skills/` that then has to
+be ignored or committed — that repository's decision, not this package's. An
+existing install is refused without `--force`: overwriting a skill someone edited
+silently is how a hand-fixed procedure disappears.
+
+`reportfast skill install --dest DIR` is the only way these commands write, and
+`tests/test_skill.py` uses it exclusively — a test that installed into the
+developer's own `~/.claude/skills` would change which skills their next session
+sees. The same file asserts the force-include targets against `pyproject.toml`,
+because a renamed target is otherwise silent: the checkout keeps working, the
+install does not, and only someone in another project finds out.
+
+The bundle's commands are held to one rule, tested: every command `SKILL.md` tells
+an agent to run has to work *from an install*. It used to say "check it from
+anywhere: `uv run python -c …`", which is true in this repo and false in every
+project that installed the library — i.e. exactly where the sentence matters.
+Re-deriving the contract (`scripts/derive_schema.py`) stays a repo step and the
+skill now says so.
+
+Whether the skill reaches *other* agent CLIs (the previous text named
+`qwen extensions install`) is unverified from the machine this was written on — no
+qwen binary, and discovery paths differ per tool. Verified here: Claude Code's
+`~/.claude/skills` and `./.claude/skills`.
+
+The skill's layout (schema, examples, references) is in **The agent's context on
+xOpat** above; the tree below is the procedural half.
 
 ```
 skills/reportfast/

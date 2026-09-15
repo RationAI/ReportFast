@@ -62,3 +62,18 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["report_fast"]
+
+# The skill travels inside the wheel, as `report_fast/skill/`, so an installed
+# lib can print or install the procedure it ships (`reportfast skill show`).
+# force-include rather than a copy step: one source of truth on disk --
+# skills/reportfast/ -- and the wheel is a projection of it, so the skill the
+# agent reads and the skill the tests check cannot disagree. An editable install
+# does not materialise force-include targets, which is why report_fast/skill.py
+# also looks for the checkout.
+[tool.hatch.build.targets.wheel.force-include]
+"skills/reportfast" = "report_fast/skill"
+# The golden sessions the skill tells an agent to imitate. Bundled for the same
+# reason, as its own directory rather than nested inside the skill: in a checkout
+# examples/ is a sibling of skills/, and nesting it would make the two layouts
+# answer different paths for the same thing.
+"examples" = "report_fast/examples"
