@@ -54,9 +54,17 @@ session load or quietly not load; re-derive only if the viewer moves.
 - `sanitizeAgainst` in `src/app.ts` drops every key outside the viewer's `setup`
   allowlist without a word, which is why the library rejects them in Python
   against `PARAM_KEYS` (`xopat.py:92`) instead of shipping dead JSON.
-- The bare `appBar` / `globalMenu` / `mainMenu` / `navigator` / `scaleBar` /
-  `statusBar` / `toolBar` still work as deprecated aliases of `params.ui.<key>`;
-  write the nested spelling.
+- Of the flat `params.ui.<key>` spellings, only **`scaleBar`, `statusBar` and
+  `toolBar` survive**. `getUiOption` does fall back to a flat `params[key]`, but
+  `sanitizeAgainst` runs *first* and strips any top-level key the setup defaults
+  do not carry — and `appBar`, `globalMenu`, `mainMenu`, `navigator`
+  (`globalMenuMode`, `sideMenuCompact`) are not among them, so they never reach the
+  fallback. Write `params.ui.<key>`, always.
+- The library splits them the same way: `contract.flat_ui_aliases()` (three, kept
+  silently) versus `contract.stripped_flat_ui_aliases()` (six, which the viewer
+  drops). A *paste* holding one of the six gets a warning naming the key and the
+  nested spelling; an authored session is refused. Trusting `getUiOption` alone is
+  how four dead keys spent a release in `PARAM_KEYS`.
 - `viewport`, `activeBackgroundIndex` and `activeVisualizationIndex` record where
   the author was looking, not what to show. `from_config` drops them by default
   (`STATE_KEYS`, `session.py:62`); `drop_state=False` keeps even those.

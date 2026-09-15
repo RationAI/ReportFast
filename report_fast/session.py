@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
 import urllib.parse
 import warnings
 from pathlib import Path, PurePosixPath
@@ -39,10 +40,10 @@ from typing import (
     Union,
 )
 
+from .audit import Finding, audit, join, split
 from .config import SessionPreset, deep_merge, resolve_preset
 from .xopat import (
     DEFAULT_THUMBNAIL_SIZE,
-    PARAM_KEYS,
     XopatEndpoint,
     XopatError,
     background_protocol,
@@ -86,6 +87,46 @@ SLIDE_PATTERNS = (
 )
 
 Slide = Union[str, Path]
+
+
+def _caller_stacklevel() -> int:
+    """Frames to climb so a warning blames whoever called us, not this file.
+
+    A fixed `stacklevel=3` is a promise that breaks the first time someone adds a
+    wrapper: `from_config` -> `validate` is two frames, but
+    `SessionTemplate.from_config` -> `from_config` -> `validate` is three, and
+    `bind()` is another, so a magic number lands the blame on whichever of our own
+    lines happened to be nearest. Walking out of the package instead keeps the
+    pointer on the user's call from any depth, which is the only place a paste
+    warning is actionable -- and `from_config`, `bind`, `as_session` and the
+    manifest are four different depths today.
+
+    Cheap deliberately: `sys._getframe` reads no source, unlike `inspect.stack`,
+    and this runs only when there is something to warn about. On an interpreter
+    without `_getframe` the walk is not possible, so it falls back to blaming its
+    caller -- wrong by a frame in deep paths, which is what a fixed stacklevel
+    would be everywhere anyway.
+    """
+    getframe = getattr(sys, "_getframe", None)
+    if getframe is None:  # pragma: no cover - CPython has had it since 2.x
+        return 2
+    # Two frames up, and stacklevel 2 to match: `warn(..., stacklevel=2)` inside
+    # `validate` already means "validate's caller", so the walk starts on the same
+    # frame the level counts. Starting one lower would report the caller's caller
+    # the moment a user called `validate()` directly.
+    frame, level = getframe(2), 2
+    while frame is not None:
+        if not _is_ours(str(frame.f_globals.get("__name__", ""))):
+            return level
+        frame, level = frame.f_back, level + 1
+    return level  # every frame was ours: nothing external to blame
+
+
+def _is_ours(module_name: str) -> bool:
+    """Whether `module_name` is this package. Prefix-matched on `report_fast.`
+    and not on `report_fast`, so a third-party `report_fast_helpers` counts as
+    external and still gets blamed for its own paste."""
+    return module_name == __package__ or module_name.startswith(f"{__package__}.")
 
 
 def _data_id(entry: Any) -> Any:
@@ -142,6 +183,13 @@ class XopatSession:
         plugins: Plugin id -> config.
         extra: Top-level keys this class does not model, kept for round-tripping.
         endpoint: Deployment to link against; `None` uses the environment default.
+        authoritative: Whether this session is *ours* to hold to the letter, as
+            opposed to pasted from elsewhere -- which decides `validate()`'s
+            verdict on keys the viewer would merely drop. `from_slide` and
+            `bind` set it; `from_config` sets it only under `strict=True`. It
+            travels with `copy()`/`merge()` on purpose: a session is not
+            promoted to authored by having been copied, and a template bound 300
+            times keeps whatever verdict its design arrived under.
     """
 
     def __init__(
@@ -154,7 +202,18 @@ class XopatSession:
         plugins: Optional[Mapping[str, Any]] = None,
         extra: Optional[Mapping[str, Any]] = None,
         endpoint: Optional[XopatEndpoint] = None,
+        authoritative: bool = False,
     ):
+        self.authoritative = bool(authoritative)
+        #: `(visualization index, shader key, param key)` for every layer param
+        #: that arrived through an explicit opt-out -- `ShaderConfig.with_params`
+        #: or a manifest mask row's `params:` -- meaning "the library has not
+        #: modelled this field, keep it". `validate()` passes the resulting JSON
+        #: paths to the audit as `carried`, so the door stays open under the strict
+        #: verdict instead of becoming an error no opt-out reaches. Recorded per
+        #: param rather than per block: hand-editing the same `params` later should
+        #: still be checked. See `report_fast.audit.audit`.
+        self.carried: List[Tuple[int, str, str]] = []
         self.params: Dict[str, Any] = dict(params or {})
         self.data: List[Any] = list(data or [])
         self.background: List[Dict[str, Any]] = [
@@ -192,7 +251,7 @@ class XopatSession:
         One level is not enough: `add_layer` writes into a visualization's
         `shaders` map, and a pasted session is the caller's property, not ours.
         """
-        return XopatSession(
+        session = XopatSession(
             params=copy.deepcopy(self.params),
             data=copy.deepcopy(self.data),
             background=copy.deepcopy(self.background),
@@ -200,7 +259,12 @@ class XopatSession:
             plugins=copy.deepcopy(self.plugins),
             extra=copy.deepcopy(self.extra),
             endpoint=self.endpoint,
+            authoritative=self.authoritative,
         )
+        # An opt-out the caller declared survives being copied or bound; a copy
+        # is not a new author, and `SessionTemplate.bind` copies on every pass.
+        session.carried = list(self.carried)
+        return session
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, XopatSession):
@@ -469,6 +533,8 @@ class XopatSession:
             or f"layer_shader_{len(self.visualizations[visualization]['shaders'])}"
         )
         self.visualizations[visualization]["shaders"][key] = shader_layer(spec, index)
+        for param in spec.get("carried_params") or ():
+            self.carried.append((visualization, key, param))
         return index
 
     def merge(self, other: "XopatSession") -> "XopatSession":
@@ -507,6 +573,13 @@ class XopatSession:
         for key, value in other.plugins.items():
             merged.plugins.setdefault(key, copy.deepcopy(value))
         merged.extra.update(copy.deepcopy(other.extra))
+        # The opt-outs travel with the sessions they opted out in, renumbered the
+        # same way `other`'s visualizations were -- otherwise a merged session
+        # would audit `other`'s carried params as fresh mistakes.
+        merged.carried.extend(
+            (visualization + viz_offset, shader, param)
+            for visualization, shader, param in other.carried
+        )
         return merged
 
     @classmethod
@@ -566,6 +639,10 @@ class XopatSession:
             params=deep_merge(configuration.params, params or {}),
             plugins=deep_merge(configuration.plugins, plugins or {}),
             endpoint=endpoint or configuration.endpoint,
+            # Built here, so every soft finding is ours: an out-of-allowlist
+            # `params` key from this constructor is a typo, not a colleague's
+            # settings we have not transcribed.
+            authoritative=True,
         )
         target = session.endpoint_for()
         background_id = mount_path(slide, target.mount_root)
@@ -589,7 +666,7 @@ class XopatSession:
                 lossless=configuration.lossless if lossless is None else lossless,
                 endpoint=target,
             )
-        session.validate(strict=True)
+        session.validate()
         return session
 
     @classmethod
@@ -633,18 +710,6 @@ class XopatSession:
         for key in [key for key in body if key in RUNTIME_KEYS]:
             body.pop(key)
 
-        unknown_top = sorted(set(body) - set(SESSION_KEYS))
-        if unknown_top:
-            if strict:
-                raise XopatError(
-                    f"Unknown session keys {unknown_top}. They are kept as-is otherwise -- "
-                    "the viewer ignores what it does not know."
-                )
-            warnings.warn(
-                f"Session carries keys the viewer does not read: {unknown_top}. Kept verbatim.",
-                stacklevel=2,
-            )
-
         params = dict(body.pop("params", None) or {})
         if drop_state:
             for key in sorted(STATE_KEYS.intersection(params)):
@@ -658,7 +723,15 @@ class XopatSession:
             plugins=body.pop("plugins", None) or {},
             extra=body,
             endpoint=endpoint,
+            # `strict` here is what makes `from_config(..., strict=True)` the
+            # agent path's gate, and `SessionTemplate.from_config(strict=True)`
+            # the agent's *design* gate: hand the design over once, strictly, and
+            # every one of the 300 bindings inherits that verdict.
+            authoritative=strict,
         )
+        # Unknown keys, off-allowlist params, undeclared layer params and
+        # dangling references are all reported by validate() now -- one walk, one
+        # vocabulary, and messages that quote the viewer rather than this file.
         session.validate(strict=strict)
         return session
 
@@ -714,63 +787,88 @@ class XopatSession:
 
     # ------------------------------------------------------------ validation
 
-    def validate(self, *, strict: bool = True) -> None:
-        """Check what would fail in the browser, before a link leaves the tool.
+    def carried_paths(self) -> List[str]:
+        """The JSON paths of params the caller carried through deliberately.
 
-        The viewer hard-fails on a `background[].dataReference` it cannot
-        resolve and silently drops `params` keys outside its allowlist, so both
-        are worth catching while there is still a Python traceback to attach
-        them to.
+        `(visualization, shader key, param key)` triples from `add_layer`, turned
+        into the paths the audit names them by. Empty for a session that arrived
+        as JSON -- a paste has no opt-outs in it, only whatever its author wrote,
+        and that gets checked like anything else.
         """
-        problems = []
-        unknown_params = sorted(set(self.params) - PARAM_KEYS)
-        if unknown_params:
-            problems.append(
-                f"unknown params {unknown_params}: the viewer drops keys outside its "
-                "`setup` allowlist without a word (see PARAM_KEYS in report_fast/xopat.py)"
+        return [
+            f"visualizations[{visualization}].shaders.{shader}.params.{param}"
+            for visualization, shader, param in self.carried
+        ]
+
+    def findings(self) -> List["Finding"]:
+        """Every audit finding on this session's config, in document order.
+
+        The raw walk from :mod:`report_fast.audit`, with severities not yet
+        decided: use it instead of `validate()` when you want to sort the
+        findings yourself (the CLI's three-gate report does) rather than get one
+        exception or one warning.
+        """
+        return audit(self.to_config(), carried=frozenset(self.carried_paths()))
+
+    def validate(
+        self,
+        *,
+        strict: Optional[bool] = None,
+        authoritative: Optional[bool] = None,
+        stacklevel: Optional[int] = None,
+    ) -> List["Finding"]:
+        """Check what would go wrong in the browser, before a link leaves the tool.
+
+        The questions are `report_fast.audit`'s -- reference integrity, layer
+        types, the params vocabulary, key vocabulary, structure -- and every
+        message this returns names the full JSON path it came from, which is the
+        only form an agent can act on.
+
+        Args:
+            strict: Verdict for the *soft* findings (`param` / `key` -- the ones
+                the viewer would quietly drop rather than choke on). `True` makes
+                them errors, which is the **agent path**: out of the allowlist
+                means a typo until proven otherwise, and the proof is cheap when
+                the message already says which line. `False` warns and keeps, the
+                **paste path**: surviving verbatim is the feature. Default `None`
+                means "take it from `authoritative`".
+            authoritative: Overrides this session's own `authoritative` flag for
+                one call. Unset -- the normal case -- uses the flag, so callers
+                say nothing and get the verdict the session arrived under. It
+                does *not* change the hard findings: a `data[]` reference that is
+                not there is an error on every path, because there the viewer does
+                not quietly ignore anything, it fails to boot or renders a
+                plausible image of nothing.
+            stacklevel: How far up to point the warning. Defaults to "out of the
+                package", which is what makes the paste warning blame the line
+                that pasted rather than a line in this file, from any call depth
+                -- see :func:`_caller_stacklevel`.
+
+        Returns:
+            The warnings that were not raised -- normally empty, since the
+            default verdict raises whatever it finds.
+
+        Raises:
+            XopatError: on any hard finding, and on soft ones under `strict`.
+        """
+        if strict is None:
+            strict = self.authoritative if authoritative is None else bool(authoritative)
+        if stacklevel is None:
+            stacklevel = _caller_stacklevel()
+        findings = self.findings()
+        errors, notes = split(findings, strict=strict)
+        if errors:
+            raise XopatError(
+                f"Session will not load in xOpat v3 as authored -- {join(errors)}."
             )
-        for index, entry in enumerate(self.background):
-            reference = entry.get("dataReference")
-            if isinstance(reference, int):
-                if not 0 <= reference < len(self.data):
-                    problems.append(
-                        f"background[{index}].dataReference={reference} is outside data[] "
-                        f"(0..{len(self.data) - 1}) -- the viewer refuses to boot at all"
-                    )
-                continue
-            if not reference:
-                problems.append(
-                    f"background[{index}] has no dataReference; one reference per background "
-                    "is required"
-                )
-            visualization = entry.get("visualizationIndex")
-            if isinstance(visualization, int) and not 0 <= visualization < len(
-                self.visualizations
-            ):
-                problems.append(
-                    f"background[{index}].visualizationIndex={visualization} is outside "
-                    f"visualizations[] (0..{len(self.visualizations) - 1})"
-                )
-        for index, visualization in enumerate(self.visualizations):
-            for shader_id, shader in (visualization.get("shaders") or {}).items():
-                references = _as_id_list((shader or {}).get("dataReferences", []))
-                dangling = [
-                    ref
-                    for ref in references
-                    if isinstance(ref, int) and not 0 <= ref < len(self.data)
-                ]
-                if dangling:
-                    problems.append(
-                        f"visualizations[{index}].shaders[{shader_id!r}].dataReferences "
-                        f"{dangling} point outside data[]"
-                    )
-        if problems:
-            message = "; ".join(problems)
-            if strict:
-                raise XopatError(f"Session will not load in xOpat v3 -- {message}.")
+        if notes:
+            # The paste path's promise: nothing was changed, the viewer will drop
+            # these, and this is the only moment anyone can be told.
             warnings.warn(
-                f"Session may not load in xOpat v3 -- {message}.", stacklevel=3
+                f"Kept verbatim, but the viewer will drop these -- {join(notes)}.",
+                stacklevel=stacklevel,
             )
+        return notes
 
 
 def _as_str(value: Slide) -> str:
@@ -870,6 +968,12 @@ class SessionTemplate:
                 "the template's own data there."
             )
 
+        # No `strict=True` here on purpose. This used to force the strict verdict
+        # on every bind, which quietly broke the paste promise halfway through a
+        # loop: the template passed `from_config` with a warning, and then the
+        # 3rd slide of 300 raised on the same key. The session's own
+        # `authoritative` flag -- set by how it arrived, and carried by `copy()`
+        # -- is the right verdict, and it is the one `validate()` now takes.
         bound = self.session.copy()
         by_name = {name: index for index, name in self.slots.items()}
         for slot_name, value in slots.items():
@@ -887,7 +991,7 @@ class SessionTemplate:
             bound.bind_name(name)
         if params:
             bound.params = deep_merge(bound.params, params)
-        bound.validate(strict=True)
+        bound.validate()
         return bound
 
 

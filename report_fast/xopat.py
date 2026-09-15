@@ -47,11 +47,14 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
+from . import contract
 from .shader import (
     RETIRED_SHADER_TYPES,
     ShaderConfig,
     ShaderType,
     UnknownShaderTypeError,
+    UNFILTERED_PARAM_TYPES,
+    accepts_param,
     allowed_params,
 )
 
@@ -78,22 +81,38 @@ LOSSLESS_TILE_FORMAT = "png"
 #: `$.FlexRenderer::createShaderLayer` throw, killing the whole layer.
 SHADER_TYPES = frozenset(shader_type.value for shader_type in ShaderType)
 
-#: Layers whose params are free-form descriptors rather than scalar controls;
-#: their contents are validated by `ShaderConfig`, not by key filtering.
-_UNFILTERED_PARAM_TYPES = frozenset({ShaderType.GROUP, ShaderType.INTERACTION_DEBUG})
-
-#: Session `params` keys the viewer reads (`XOpatSetup` in
-#: `src/types/config.d.ts`, defaulted by `src/config.json` -> `setup`). Keys
-#: outside this set are dropped by the viewer, so we reject them here instead of
-#: silently shipping dead JSON. The bare `appBar`/`globalMenu`/`mainMenu`/
-#: `navigator`/`scaleBar`/`statusBar`/`toolBar` are honored as legacy aliases of
-#: `params.ui.<key>` (`getUiOption` falls back to the flat key); prefer the
-#: nested spelling.
+#: Session `params` keys the viewer reads -- the hand-maintained half of the
+#: answer. `report_fast/schema/params-allowlist.json` holds the same list parsed
+#: out of the viewer by `scripts/derive_schema.py`, and its `--check` (run by the
+#: test suite) fails if table and artifact disagree in either direction.
+#:
+#: Why a literal here at all, when the generated file exists: a check that
+#: compared the artifact against a projection of itself would prove nothing, so
+#: this table stays an independent statement about the viewer, reviewable line by
+#: line in a diff. `param_keys()` in xopat/session validation takes the union of
+#: the two, so a key the viewer added but nobody transcribed still loads.
+#:
+#: What the viewer accepts at the *top level* of `params` is
+#: `XOpatSetup` keys (src/types/config.d.ts) UNION the defaults in
+#: src/config.json `setup`, because `sanitizeAgainst` (src/app.ts) filters
+#: incoming params against the defaults while the code reads the type -- so
+#: `branding`/`background`/`fetchAsync` (typed, no default) and
+#: `webGlPrecision`/`faultyTileThreshold`/`globalMenuMaxWidth`/the two
+#: `requestSchedulerUrgent*`/`syntheticPreviewLevel` (defaulted, not typed) are
+#: both real.
+#:
+#: What is NOT here: the `params.ui` children (`appBar`, `globalMenu`,
+#: `mainMenu`, `navigator`, and friends). They belong under `params.ui`.
+#: `getUiOption` does fall back to a flat `params[key]`, but `sanitizeAgainst`
+#: runs first and drops any top-level key the setup defaults do not carry, so
+#: four of the seven "legacy flat aliases" this table used to list were dead
+#: JSON -- accepted here, stripped in the browser, no warning anywhere. Only
+#: `scaleBar`/`statusBar`/`toolBar` are top-level `XOpatSetup` keys and thus
+#: survive flat (each folding to `params.ui.*`), and they stay.
 PARAM_KEYS = frozenset(
     {
         "activeBackgroundIndex",
         "activeVisualizationIndex",
-        "appBar",
         "background",
         "backgroundColor",
         "branding",
@@ -109,7 +128,6 @@ PARAM_KEYS = frozenset(
         "disablePluginsUi",
         "faultyTileThreshold",
         "fetchAsync",
-        "globalMenu",
         "globalMenuMaxWidth",
         "grayscale",
         "historySize",
@@ -118,10 +136,8 @@ PARAM_KEYS = frozenset(
         "kineticPanFriction",
         "kineticPanMinSpeed",
         "locale",
-        "mainMenu",
         "maxImageCacheCount",
         "maxMobileWidthPx",
-        "navigator",
         "notificationsPosition",
         "permaLoadPlugins",
         "preventNavigationShortcuts",
@@ -166,6 +182,35 @@ PARAM_KEYS = frozenset(
 
 class XopatError(ValueError):
     """Raised when a session we are about to emit could not load in xOpat v3."""
+
+
+def param_keys() -> frozenset:
+    """Every top-level `params` key the pinned viewer keeps.
+
+    The union of the hand-written `PARAM_KEYS` and the derived allowlist, which
+    is deliberately not symmetric in what it buys: a key the viewer added last
+    week and nobody transcribed still loads (derived has it), and a key we carry
+    that the viewer dropped still *loads* too but is reported by
+    `derive_schema.py --check` -- because refusing a legal key is a bug we ship to
+    the user, while a stale key is a bug we ship to ourselves.
+    """
+    return PARAM_KEYS | contract.accepted_param_keys()
+
+
+def ui_param_keys() -> frozenset:
+    """The `params.ui` vocabulary, straight from the viewer's `XOpatUiSetup`."""
+    return contract.ui_param_keys()
+
+
+def flat_ui_aliases() -> frozenset:
+    """`params.ui` children that still work spelled flat on `params`.
+
+    A subset of `ui_param_keys()`, and the interesting part is what is *not* in
+    it: `appBar`, `globalMenu`, `mainMenu` and `navigator` are read by
+    `getUiOption`, which does fall back to a flat `params[key]`, but
+    `sanitizeAgainst` strips those keys before it ever gets the chance.
+    """
+    return contract.flat_ui_aliases()
 
 
 @dataclass(frozen=True)
@@ -282,12 +327,10 @@ def _sanitize_params(
     `ShaderConfig.validate`, where the message prints what *is* declared. Two
     warnings for one field is noise; silently dropping it is the bug.
     """
-    if shader_type in _UNFILTERED_PARAM_TYPES:
+    if shader_type in UNFILTERED_PARAM_TYPES:
         return dict(params)
     declared = allowed_params(shader_type)
-    unknown = sorted(
-        key for key in params if key not in declared and not key.startswith("use_")
-    )
+    unknown = sorted(key for key in params if not accepts_param(shader_type, key))
     if unknown and not strict:
         return dict(params)
     if unknown:
@@ -298,9 +341,7 @@ def _sanitize_params(
             stacklevel=3,
         )
     return {
-        key: value
-        for key, value in params.items()
-        if key in declared or key.startswith("use_")
+        key: value for key, value in params.items() if accepts_param(shader_type, key)
     }
 
 
@@ -310,13 +351,14 @@ def normalise_layer(layer: Any) -> Dict[str, Any]:
         # `masks=["tumor.tif"]`: the file stem becomes the layer's name.
         layer = {"path": layer}
     if isinstance(layer, ShaderConfig):
+        values = layer.param_values()
         return {
             "path": layer.data_source,
             "type": layer.shader_type,
             "name": layer.name,
             "visible": layer.visible,
             "fixed": layer.fixed,
-            "params": layer.param_values(),
+            "params": values,
             # Carried through so `shader_layer` knows not to filter: a layer
             # whose author added unmodelled params on purpose (`params:` on a
             # mask row, `with_params`) has already been warned once, in
@@ -324,6 +366,16 @@ def normalise_layer(layer: Any) -> Dict[str, Any]:
             # Filtering them here as well is what made door one a lie -- the
             # param survived the shader and vanished at the wire.
             "strict_params": layer.strict_params,
+            # Named here, at the one place that still knows which of these the
+            # caller added deliberately, so `XopatSession.add_layer` can record
+            # the opt-out and `validate()` does not refuse a documented door.
+            "carried_params": []
+            if layer.strict_params
+            else sorted(
+                key
+                for key in values
+                if not accepts_param(layer.shader_type, key)
+            ),
         }
 
     if not isinstance(layer, Mapping):

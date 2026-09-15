@@ -54,6 +54,83 @@ def run(*argv) -> tuple:
     return code, out.getvalue(), err.getvalue()
 
 
+def session_root(cases=("case-01", "case-02"), *, broken=None) -> Path:
+    """A folder of authored session JSON, the way `--sessions-dir` reads it.
+
+    Written out by hand rather than via `temp_dir_sessions` so the filenames are
+    the case names: the helper numbers its files, which is right for a round trip
+    and wrong for a test about card order.
+    """
+    from report_fast.compose import load_design
+    from report_fast.xopat import XopatEndpoint
+
+    endpoint = XopatEndpoint(
+        base_url="https://xopat.test/xopat/",
+        wsi_base_url="https://tiles.test/wsi/",
+        image_protocol="wsi_service",
+        mount_root="/data",
+    )
+    design = {
+        "params": {"sessionName": "design"},
+        "data": [
+            {"dataID": "/data/x/a.tif", "protocol": "wsi_service"},
+            {"dataID": "/data/x/a.prob.tif", "protocol": "wsi_service"},
+        ],
+        "background": [
+            {"id": "s", "name": "design", "dataReference": 0, "visualizationIndex": 0}
+        ],
+        "visualizations": [
+            {
+                "name": "design",
+                "order": ["probability"],
+                "shaders": {
+                    "probability": {
+                        "type": "colormap",
+                        "name": "Probability",
+                        "visible": 1,
+                        "dataReferences": [1, 0],
+                        "params": {"color": "#ff8c00", "threshold": 0.5},
+                    }
+                },
+            }
+        ],
+    }
+    root = Path(tempfile.mkdtemp())
+    sessions = root / "sessions"
+    sessions.mkdir()
+    template = load_design(design, slots={0: "slide", 1: "mask"}, endpoint=endpoint)
+    for name in cases:
+        session = template.bind(
+            slide=f"/data/{name}/s.tif", mask=f"/data/{name}/p.tif", name=name
+        )
+        (sessions / f"{name}.json").write_text(
+            json.dumps(session.to_config(), indent=1), encoding="utf-8"
+        )
+    if broken:
+        document = json.loads((sessions / f"{cases[0]}.json").read_text(encoding="utf-8"))
+        document["params"][broken] = 0.5
+        (sessions / f"zz-{broken}.json").write_text(
+            json.dumps(document), encoding="utf-8"
+        )
+    (root / "design.json").write_text(json.dumps(design, indent=1), encoding="utf-8")
+    return root
+
+
+def stub_compose_probe(answers):
+    """Patch `verify.probe` -- the door imports it inside `build`, by name.
+
+    Not the same as `stub_probe` above, and the difference is the reason both
+    exist: `manifest` binds `probe` at import, `compose` binds it at call. Patching
+    the wrong one tests the network.
+    """
+    real = verify_module.probe
+    verify_module.probe = lambda ids, *a, **k: answers(list(ids))
+    return lambda: setattr(verify_module, "probe", real)
+
+
+# ── the manifest-less door: --sessions-dir / --session / --design ───────────
+
+
 def stub_probe(answers):
     """Replace the probe manifest calls, returning the restorer.
 
@@ -356,7 +433,10 @@ def test_the_library_allows_publishing_without_writing_locally():
     assert "CLI report" in sent[0][0]  # the report itself went up
     # The declared manifest and the resolved plan travel with it, so the run can
     # answer what it contains years later -- same contract as a normal publish.
-    assert sent[0][2] == ["manifest.yaml", "plan.json"]
+    # Three, not two: the manifest is what was meant, plan.json is what resolved,
+    # and provenance.json names the endpoint, viewer stamp and DataIDs the links
+    # carry. `out=False` means none of them exists as a local file.
+    assert sent[0][2] == ["manifest.yaml", "plan.json", "provenance.json"]
     assert not sent[0][3].exists(), "the staging directory is a tempdir; it must not leak"
 
 
@@ -510,6 +590,357 @@ def test_a_missing_mlflow_says_which_extra_to_sync():
         mlflow_module.Mlflow.client = real
     assert code == 3
     assert "uv sync --extra mlflow" in err
+
+
+# ── the manifest-less door ──────────────────────────────────────────────────
+
+
+def test_build_from_a_sessions_dir_writes_one_file_and_nothing_else():
+    root = session_root()
+    out = root / "report.html"
+    code, printed, _ = run(
+        "build", "--sessions-dir", str(root / "sessions"),
+        "--title", "Cohort QC", "-o", str(out), "--no-check",
+    )
+    assert code == 0, printed
+    html = out.read_text(encoding="utf-8")
+    assert "Cohort QC" in html and "case-01" in html and "case-02" in html
+    # "nothing is persisted except the HTML and its provenance sidecar" is the
+    # ruling; assert the nothing too. No manifest, no plan file, no session copy.
+    assert sorted(p.name for p in root.iterdir()) == [
+        "design.json",
+        "report.html",
+        "report.provenance.json",
+        "sessions",
+    ]
+    # The sidecar is a *record*, not a second copy of the inputs: it names the
+    # folder it read, it does not re-state the sessions inside it.
+    record = json.loads((root / "report.provenance.json").read_text(encoding="utf-8"))
+    assert record["kind"] == "composition"
+    assert record["inputs"] == {"sessions_dir": str(root / "sessions"), "layout": "grid"}
+    assert record["sources"] == [str(root / "sessions")]
+    # Flat strings, not the session documents: the question a reader brings is
+    # "which files does this report claim exist", and `data` entries carry a dozen
+    # fields that say nothing about that.
+    assert all(isinstance(item, str) for item in record["data_ids"])
+    assert len(record["data_ids"]) == 4, "two cases, one slide and one mask each"
+    assert record["viewer"]["version"]
+
+
+def test_the_door_reads_a_session_argument_as_well_as_a_folder():
+    root = session_root(cases=("case-01",))
+    extra = root / "solo.json"
+    extra.write_text((root / "sessions/case-01.json").read_text(encoding="utf-8"))
+    code, printed, _ = run(
+        "build", "--session", str(extra),
+        "--sessions-dir", str(root / "sessions"),
+        "-o", str(root / "r.html"), "--no-check",
+    )
+    assert code == 0, printed
+    # The explicit one first, then the folder: the grid order is the report order.
+    assert "2 cases" in printed
+
+
+def test_a_session_argument_accepts_inline_json():
+    root = session_root()
+    document = json.loads((root / "sessions/case-01.json").read_text(encoding="utf-8"))
+    code, printed, _ = run(
+        "build", "--session", json.dumps(document), "-o", str(root / "r.html"), "--no-check"
+    )
+    assert code == 0, printed
+    assert "1 cases" in printed, printed
+
+
+def test_the_door_probes_through_the_same_probe_and_reports_it():
+    root = session_root(cases=("case-01", "case-02"))
+    asked = []
+
+    def answers(ids):
+        asked.extend(ids)
+        return [Check(item, 200, "openable") for item in ids]
+
+    restore = stub_compose_probe(answers)
+    try:
+        code, printed, _ = run(
+            "build", "--sessions-dir", str(root / "sessions"), "-o", str(root / "r.html")
+        )
+    finally:
+        restore()
+    assert code == 0, printed
+    assert "probe" in printed
+    # Every data[] entry of every session, which is what `session_data_ids` means.
+    assert len(asked) == 4, asked
+
+
+def test_a_refused_dataid_is_exit_2_from_this_door_too():
+    root = session_root(cases=("case-01",))
+    restore = stub_compose_probe(lambda ids: [Check(item, 404, "no such file") for item in ids])
+    try:
+        code, _, err = run(
+            "build", "--sessions-dir", str(root / "sessions"), "-o", str(root / "r.html")
+        )
+    finally:
+        restore()
+    assert code == 2
+    assert "would not open" in err
+
+
+def test_a_check_only_door_build_writes_no_file_anywhere():
+    """Pinned because it did write one.
+
+    `Composition.build` was coalescing a falsy `out` to `report.html`, and the CLI
+    passes `out=False` for `--check-only` -- so the run printed "wrote nothing"
+    beside a file it had just made in the caller's directory. The same trap the
+    manifest path documents at its own `out is not False` check.
+    """
+    root = session_root()
+    inside = root / "cwd"
+    inside.mkdir()
+    import os
+
+    where = os.getcwd()
+    os.chdir(inside)
+    try:
+        code, printed, _ = run(
+            "build", "--sessions-dir", str(root / "sessions"), "--check-only", "--no-check"
+        )
+    finally:
+        os.chdir(where)
+    assert code == 0, printed
+    assert "wrote     nothing (--check-only)" in printed
+    assert list(inside.iterdir()) == [], list(inside.iterdir())
+
+
+def test_no_grid_lays_one_card_per_row():
+    root = session_root()
+    for flag, want in (("--layout", "rows"), ("--no-grid", None)):
+        out = root / f"{flag.strip('-')}.html"
+        argv = ["build", "--sessions-dir", str(root / "sessions"), "-o", str(out), "--no-check"]
+        code, _, err = run(*(argv + ([flag, "rows"] if want else [flag])))
+        assert code == 0, err
+        # The grid class is the grid's; a row of cards does not have it.
+        assert "rf-slide-grid" not in out.read_text(encoding="utf-8")
+    assert sorted(p.name for p in root.iterdir()) == [
+        "design.json",
+        "layout.html",
+        "layout.provenance.json",
+        "no-grid.html",
+        "no-grid.provenance.json",
+        "sessions",
+    ]
+
+
+def test_a_bad_session_in_the_folder_is_exit_1_naming_the_file_and_the_path():
+    # The exit-1/exit-4 split, which is the whole point of two exception types:
+    # one file among two is an errand about that file's contents.
+    root = session_root(broken="threshhold")
+    code, _, err = run(
+        "build", "--sessions-dir", str(root / "sessions"), "-o", str(root / "r.html"), "--no-check"
+    )
+    assert code == 1
+    assert "zz-threshhold.json" in err, err
+    assert "params.threshhold" in err, err
+    assert not (root / "r.html").exists(), "a refused build writes no report"
+
+
+def test_a_missing_folder_or_file_is_exit_4_and_not_a_spec_error():
+    root = session_root()
+    code, _, err = run("build", "--sessions-dir", str(root / "nope"), "--no-check")
+    assert code == 4 and "not a directory" in err
+    code, _, err = run("build", "--session", str(root / "nope.json"), "--no-check")
+    assert code == 4
+
+    empty = root / "empty"
+    empty.mkdir()
+    code, _, err = run("build", "--sessions-dir", str(empty), "--no-check")
+    assert code == 4 and "holds no" in err
+
+
+def test_publishing_from_the_door_uploads_the_record_in_the_manifest_s_place():
+    """There is no manifest to log, so the sidecar is the run's configuration.
+
+    This is the half of decision 8 that step 5 was waiting for. Asserted on what
+    the fake client *saw*, read from inside the call: the staging directory is a
+    tempdir and `logged_dir` removes it on the way out.
+    """
+    root = session_root()
+    sent = []
+
+    def capture(self, report, run_id=None, extra_dir=None):
+        staged = sorted(path.name for path in Path(extra_dir).iterdir()) if extra_dir else []
+        inside = (
+            {path.name: path.read_text(encoding="utf-8") for path in Path(extra_dir).iterdir()}
+            if extra_dir
+            else {}
+        )
+        sent.append((run_id, staged, inside, str(extra_dir)))
+        return Published(run_id=run_id, artifact="report/report.html", url="u")
+
+    real = mlflow_module.Mlflow.publish
+    mlflow_module.Mlflow.publish = capture
+    try:
+        code, printed, err = run(
+            "build", "--sessions-dir", str(root / "sessions"),
+            "-o", str(root / "r.html"), "--no-check", "--publish", "--run", "run-door",
+        )
+    finally:
+        mlflow_module.Mlflow.publish = real
+    assert code == 0, printed
+    (run_id, staged, inside, staging), = sent
+    assert run_id == "run-door"
+    # One file, not the manifest pair: nothing was declared here to log.
+    assert staged == ["provenance.json"]
+    record = json.loads(inside["provenance.json"])
+    assert record["kind"] == "composition"
+    assert record["inputs"]["sessions_dir"] == str(root / "sessions")
+    assert not (Path(staging).exists()), "the staging directory is not left behind"
+    assert "-> run run-door" in err and "never implied" in err
+    assert "published report/report.html on run run-door" in printed
+
+
+def test_publish_from_the_door_names_the_run_it_writes_to_or_refuses():
+    """Two ways to be short of an instruction, and neither uploads anything.
+
+    `--run` without `--publish` names a destination and implies a write, which is
+    the one implication the publishing rule is about; `--publish` without a run has
+    no manifest `publish:` to fall back to, so there is nothing to guess from.
+    """
+    root = session_root()
+    sent = []
+    real = mlflow_module.Mlflow.publish
+    mlflow_module.Mlflow.publish = lambda *a, **k: sent.append(a)
+    try:
+        code, _, err = run(
+            "build", "--sessions-dir", str(root / "sessions"),
+            "-o", str(root / "a.html"), "--no-check", "--run", "abc123",
+        )
+        assert code == 4 and "never implied" in err, err
+        code, _, err = run(
+            "build", "--sessions-dir", str(root / "sessions"),
+            "-o", str(root / "b.html"), "--no-check", "--publish",
+        )
+        assert code == 4 and "needs a run" in err, err
+    finally:
+        mlflow_module.Mlflow.publish = real
+    assert sent == [], "a refused publish moved nothing"
+    assert not (root / "a.html").exists() and not (root / "b.html").exists(), (
+        "the refusal comes before the build, so no file either"
+    )
+
+
+def test_a_door_publish_carries_no_local_html_and_still_uploads_the_record():
+    """`--check-only --publish` is refused for the same reason on both doors: one
+    flag promises nothing is written and the other writes to a server."""
+    root = session_root()
+    code, _, err = run(
+        "build", "--sessions-dir", str(root / "sessions"),
+        "--check-only", "--no-check", "--publish", "--run", "run-x",
+    )
+    assert code == 4 and "--check-only" in err, err
+
+
+def test_design_and_sessions_dir_are_two_questions_not_one_command():
+    root = session_root()
+    code, _, err = run(
+        "plan", "--design", str(root / "design.json"),
+        "--sessions-dir", str(root / "sessions"),
+    )
+    assert code == 4
+    assert "two commands" in err, err
+
+
+def test_plan_design_validates_one_design_and_shows_its_slots():
+    root = session_root()
+    code, printed, _ = run(
+        "plan", "--design", str(root / "design.json"),
+        "--slot", "0=slide", "--slot", "1=mask",
+    )
+    assert code == 0, printed
+    assert "data[0] = slide" in printed and "data[1] = mask" in printed
+    assert "design.json" in printed
+
+
+def test_plan_design_shows_an_unslotable_index_as_fixed_not_as_a_mistake():
+    """A design with a shared reference atlas at index 2 is intentional. The first
+    reading of it is usually "the caller forgot a slot", so the output has to say
+    which of the two it thinks it is looking at."""
+    root = session_root()
+    path = root / "atlas.json"
+    document = json.loads((root / "design.json").read_text(encoding="utf-8"))
+    document["data"].append({"dataID": "/data/atlas/reference.tif", "protocol": "wsi_service"})
+    path.write_text(json.dumps(document), encoding="utf-8")
+    code, printed, _ = run("plan", "--design", str(path), "--slot", "0=slide", "--slot", "1=mask")
+    assert code == 0, printed
+    assert "fixed" in printed and "intentional" in printed, printed
+
+
+def test_plan_design_offers_the_python_that_binds_it():
+    """The CLI validates the design; the loop lives in Python. Pointing at it is
+    the difference between a tool that stops and a tool that dead-ends."""
+    root = session_root()
+    code, printed, _ = run("plan", "--design", str(root / "design.json"))
+    assert code == 0, printed
+    assert "load_design" in printed and "design.bind" in printed, printed
+    assert "0: 'slide'" in printed, printed  # the slots to paste, default included
+
+
+def test_build_refuses_a_design_because_binding_it_is_not_a_command_line():
+    root = session_root()
+    code, _, err = run(
+        "build", "--design", str(root / "design.json"), "-o", str(root / "r.html")
+    )
+    # --design is a plan-only flag, so argparse answers it; the library-level
+    # refusal is asserted in test_the_door_still_refuses_a_design_when_handcoded.
+    assert code == 4
+    assert "--design" in err
+
+
+def test_the_door_still_refuses_a_design_when_handcoded():
+    """The same refusal through the library door, where the flag exists but means
+    nothing: `_build` is reached with a namespace that has `design` set."""
+    import argparse
+
+    from report_fast.__main__ import UsageError, _build
+
+    args = argparse.Namespace(
+        design="x.json", sessions_dir=None, sessions=[], manifest=None,
+        check_only=False, publish=False, run=None, no_check=True, out=None,
+        emit_manifest=False, layout="grid", title="T", subtitle="",
+        slots=[], tracking_uri=None,
+    )
+    try:
+        _build(args)
+    except UsageError as error:
+        assert "binds nothing" in str(error)
+    else:
+        raise AssertionError("a design cannot build a report; nothing bound it")
+
+
+def test_emit_manifest_prints_and_writes_nothing():
+    root = session_root()
+    code, printed, _ = run(
+        "build", "--sessions-dir", str(root / "sessions"), "--emit-manifest"
+    )
+    assert code == 0, printed
+    assert "sessions:" in printed and "from_config" in printed
+    assert sorted(p.name for p in root.iterdir()) == ["design.json", "sessions"], (
+        "--emit-manifest is an offer on stdout, never a file the tool chose to keep"
+    )
+
+
+def test_a_command_line_with_no_input_at_all_is_a_usage_error():
+    code, _, err = run("build")
+    assert code == 4 and "needs a manifest" in err
+    code, _, err = run("plan")
+    assert code == 4 and "needs a manifest" in err
+
+
+def test_a_malformed_slot_is_explained_as_a_slot():
+    root = session_root()
+    for bad in ("slide", "0", "0="):
+        code, _, err = run("plan", "--design", str(root / "design.json"), "--slot", bad)
+        assert code == 4, bad
+        assert "INDEX=NAME" in err or "must be" in err, (bad, err)
 
 
 if __name__ == "__main__":

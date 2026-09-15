@@ -184,13 +184,17 @@ def test_import_of_json_text_and_dict_agree():
 
 
 def test_import_rejects_a_dangling_background_reference():
+    # The one finding the paste path does not soften. Dropping a colleague's
+    # `params` key would be rude; shipping a page that does not boot would be a
+    # lie, and `src/parse-input.js` hard-fails here rather than carrying on.
     config = {"data": ["a.tif"], "background": [{"dataReference": 4}]}
     with raises(XopatError):
         XopatSession.from_config(config, strict=True)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
+    with raises(XopatError) as raised:
         XopatSession.from_config(config)
-    assert any("dataReference" in str(warning.message) for warning in caught)
+    assert "background[0].dataReference" in str(raised.exception), (
+        "the message names the JSON path, which is the whole unit of repair"
+    )
 
 
 def test_dangling_shader_reference_is_caught_before_the_link_ships():

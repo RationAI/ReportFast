@@ -40,6 +40,18 @@ dev = [
     "report-fast[all]",
 ]
 
+[tool.ruff]
+# The rules this repo is held to, in the project rather than in a long command
+# someone has to remember: pyflakes, syntax errors, and bugbear. Not the style
+# families -- import ordering and naming are not what a report bug hides behind,
+# and reformatting 30 files to satisfy a linter is not a reviewable change.
+lint.select = ["F", "E9", "B"]
+# DESIGN.md: `_legacy/` is the state/server/resolver layer "deleted in spirit, kept
+# on disk". Dead code is not held to the live ruleset and not edited to satisfy a
+# linter; it is either restored (and then fixed) or deleted deliberately. Deleting
+# it is a decision for a human, so it stays excluded until someone makes it.
+extend-exclude = ["_legacy"]
+
 [tool.pytest.ini_options]
 # scripts/ holds runnable demos named test_*.py; collection would import them.
 testpaths = ["tests"]

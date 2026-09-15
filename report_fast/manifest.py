@@ -31,11 +31,11 @@ from __future__ import annotations
 import difflib
 import importlib
 import json
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
+from . import provenance
 from .build import build_report
 from .components.chart import Chart
 from .components.metrics import MetricTable
@@ -254,9 +254,11 @@ def _check_source(row: Any, where: str, omit: Sequence[str] = ()) -> None:
     except ManifestError as error:
         if not omit:
             raise
+        # `from error`: the message quotes the error it came from, so chaining it
+        # is not decoration -- a reader of the traceback sees both halves.
         raise ManifestError(
             f"{error} -- for the source half, the keys are {', '.join(_SOURCE)}."
-        )
+        ) from error
 
 
 def _check_mask(row: Any, number: int) -> None:
@@ -725,6 +727,12 @@ class Built:
     out: Optional[Path] = None
     checks: List[Check] = field(default_factory=list)
     published: Optional[Published] = None
+    #: Where the provenance sidecar went, next to `out`. None when no page was
+    #: written -- the record describes a file, so it follows the file's rule.
+    provenance: Optional[Path] = None
+    #: The record itself, written or not. A publish logs it without the file, and
+    #: a caller asserting on a build in CI reads this rather than re-opening it.
+    record: Optional[Any] = field(default=None, repr=False)
 
     @property
     def ok(self) -> bool:
@@ -735,12 +743,13 @@ class Built:
 def build(
     source: Union[str, Path, Mapping[str, Any], Spec],
     *,
-    out: Union[str, Path, None] = None,
+    out: Union[str, Path, bool, None] = None,
     check: bool = False,
     publish: bool = False,
     run_id: Optional[str] = None,
     flow: Optional[Mlflow] = None,
     endpoint: Optional[XopatEndpoint] = None,
+    with_provenance: bool = True,
 ) -> Built:
     """Build the report a manifest describes.
 
@@ -754,6 +763,10 @@ def build(
         run_id: Overrides the manifest's run for this one publish.
         flow: MLflow client; built from `flow:` in the manifest otherwise.
         endpoint: Deployment coordinates, overriding `endpoint:`.
+        with_provenance: Write `report.provenance.json` beside the HTML. On by
+            default: a manifest is a declaration of intent and the sidecar is the
+            record of what resolved, and the pair is what makes the run answerable.
+            `False` for a build into a directory that is about to be thrown away.
 
     Returns:
         A :class:`Built` with the report, the plan behind it, the probe results
@@ -795,6 +808,23 @@ def build(
 
     if check:
         built.checks = probe(session_data_ids(resolved.sessions), target)
+    # Recorded from `resolved` -- the plan after drives, masks and min_layers have
+    # had their say -- and never from `spec.spec`, which is what someone wrote
+    # rather than what ran. That disagreement is the failure this file exists to
+    # make impossible.
+    record = provenance.for_manifest(
+        spec, resolved, endpoint=target, design=None
+    )
+    # A publish with no record is refused here rather than in `_publish`, so the
+    # message arrives before a byte is staged: `with_provenance=False` says "this
+    # build is disposable", and a disposable build that uploads is not disposable.
+    if publish and not with_provenance:
+        raise ManifestError(
+            "publish=True with with_provenance=False: there would be no record of "
+            "what the run received. Either keep the record or do not upload."
+        )
+    built.provenance = provenance.write_for(built.out, record) if with_provenance else None
+    built.record = record
     if publish:
         built.published = _publish(spec, built, run_id, flow)
     return built
@@ -881,6 +911,12 @@ def _charts(spec: Spec) -> Any:
 
 
 def _publish(spec: Spec, built: Built, run_id: Optional[str], flow: Optional[Mlflow]):
+    if built.record is None:  # pragma: no cover - build() always fills it in
+        raise ManifestError(
+            "This build carries no provenance record (with_provenance=False), and a "
+            "publish without one would log a report nothing describes. Build it with "
+            "the record and publish that."
+        )
     target = run_id or _publish_run(spec)
     if not target:
         raise ManifestError(
@@ -888,16 +924,18 @@ def _publish(spec: Spec, built: Built, run_id: Optional[str], flow: Optional[Mlf
             "got no run id."
         )
     client = flow or _flow(spec)
-    with tempfile.TemporaryDirectory(prefix="reportfast-") as tmp:
-        # The declared manifest and the resolved plan travel with the report, so
-        # a run can answer what it contains years later. `conf/` is the slot the
-        # original tool logged its Hydra configuration under.
-        Path(tmp, "manifest.yaml").write_text(
-            _yaml().safe_dump(spec.spec, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-        Path(tmp, "plan.json").write_text(built.plan.to_json(), encoding="utf-8")
-        return client.publish(built.report, run_id=target, extra_dir=tmp)
+    # Three files, three different questions, all decided in one place
+    # (`provenance.logged_dir`, which the manifest-less door uses too): the
+    # manifest is what someone *meant*, `plan.json` is what the resolution decided,
+    # and the sidecar names the endpoint, the viewer stamp and the DataIDs the links
+    # carry. `conf/` is the slot the original tool logged its Hydra config under.
+    record = built.record
+    with provenance.logged_dir(
+        record,
+        manifest_text=_yaml().safe_dump(spec.spec, sort_keys=False, allow_unicode=True),
+        plan_json=built.plan.to_json(),
+    ) as staging:
+        return client.publish(built.report, run_id=target, extra_dir=staging)
 
 
 def _unused(_: Iterable[Any]) -> None:  # pragma: no cover - keeps imports honest

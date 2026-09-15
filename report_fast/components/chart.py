@@ -54,9 +54,11 @@ class Chart(BaseComponent):
         if text.startswith(("http://", "https://", "data:")):
             return text
         path = Path(text)
-        if external or not path.exists():
+        if external or not text or not path.exists():
             # Either asked for a reference, or it is one already (a root-relative
-            # URL served next to the report).
+            # URL served next to the report). `not text` matters on its own:
+            # `Path("")` is `.`, which exists, and reading a directory as an image
+            # is a confusing way to say "you passed no image".
             return text
         mime = "image/svg+xml" if path.suffix.lower() == ".svg" else "image/png"
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")

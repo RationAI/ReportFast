@@ -14,7 +14,7 @@ against a redone mask run looks like the one it replaces.
 | `…/redirect.php?visualization=<json>` | `…/v3/#<urlencoded json>` — `redirect.php` deleted upstream |
 | shader `dataReference: 0` | `dataReferences: [0]`; the singular key is ignored, silently |
 | `lossless: true` on a visualization | `{"dataID": "…", "options": {"format": "png"}}` on that layer's `data[]` entry |
-| `params.toolBar` | `params.ui.toolBar`; the flat spelling is a deprecated alias |
+| `params.toolBar` | `params.ui.toolBar`. Only `toolBar`/`statusBar`/`scaleBar` still work flat; `appBar`/`globalMenu`/`mainMenu`/`navigator` are stripped before the fallback reads them (`contract.stripped_flat_ui_aliases()`) |
 | `shader_conf: {type, opacity, color}` | `{type, params: {…}, opacity}` — v2 sat the controls beside `type`, v3 nests them (`xopat.py:323`) |
 | `classify` / `segmentation` / `bounding_box` | `colormap` / `colormap` / `iconmap` (`RETIRED_SHADER_TYPES`, `shader.py:186-190`) |
 | inline JS protocol template | the **name** of a registered `slide_protocols` entry |

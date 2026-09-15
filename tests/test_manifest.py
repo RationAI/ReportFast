@@ -574,8 +574,18 @@ def test_publish_logs_the_declared_manifest_and_the_resolved_plan():
     assert client.logged_dirs, "the manifest and plan travel with the report"
     (_, local_dir, artifact), = client.logged_dirs
     listed = dict(client.seen[local_dir])
-    assert sorted(listed) == ["manifest.yaml", "plan.json"]
+    assert sorted(listed) == ["manifest.yaml", "plan.json", "provenance.json"]
     assert artifact == "report/conf"
+    # The sidecar travels *with* a manifest, not instead of one: it is the only one
+    # of the three that records the endpoint and the viewer stamp the links carry.
+    record = json.loads(listed["provenance.json"])
+    assert record["kind"] == "manifest"
+    # A manifest built from a Python dict has no filename to name; recording the
+    # placeholder path manifest.read gives it would send a reader to a file that
+    # does not exist, so the field is null and says so.
+    assert record["inputs"]["manifest"] is None
+    assert record["report"]["cases"] == ["case_001", "case_002"]
+    assert record["viewer"]["version"]
     # What is logged is what *ran*: the plan carries the resolved cases, which is
     # the question a run has to keep answering after the case list moves.
     assert json.loads(listed["plan.json"])["cases"] == ["case_001", "case_002"]

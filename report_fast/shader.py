@@ -23,10 +23,13 @@ v2 -> v3 differences encoded here:
 from __future__ import annotations
 
 import json
+import re
 import warnings
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+
+from . import contract
 
 
 class ShaderType(str, Enum):
@@ -115,7 +118,6 @@ SHADER_PARAMS: Dict[ShaderType, frozenset] = {
         {
             "use_channel0",
             "threshold",
-            "iconN",
             "grid_layout",
             "cell_size",
             "jitter",
@@ -177,6 +179,94 @@ SHADER_PARAMS: Dict[ShaderType, frozenset] = {
 #: Param every layer accepts regardless of type.
 COMMON_PARAMS = frozenset({"opacity"})
 
+#: Layers whose params are free-form descriptors rather than scalar controls: a
+#: `group` names member layers, `interaction-debug` carries one opaque config
+#: block. Neither has a closed param vocabulary, so filtering their keys would
+#: delete the very feature they exist to reach.
+UNFILTERED_PARAM_TYPES = frozenset({ShaderType.GROUP, ShaderType.INTERACTION_DEBUG})
+
+#: Filter/blend flags rather than UI controls; `_buildControls` skips every
+#: `use_`-prefixed key, so they carry values the shader reads without ever
+#: appearing in a layer's `controls`.
+FILTER_PARAM_PREFIX = "use_"
+
+
+@dataclass(frozen=True)
+class ParamFamily:
+    """Controls the viewer *generates* rather than declares.
+
+    `_expandControlDefinitions` (flex-renderer.js) turns an `array:` control
+    definition into one real control per data interval, named by a template:
+    `icons` becomes `icon0`, `icon1`, … up to the layer's class count. Neither the
+    definition's key (`icons`) nor its docs spelling (`iconN`) is a param a session
+    ever carries, so neither belongs in `SHADER_PARAMS` -- what belongs here is the
+    shape of the names the viewer actually reads.
+
+    `template` is spelled the way `derive_schema.py` publishes it (`icon{N}` for
+    the viewer's ``icon${index}``), so the two can be compared literally instead of
+    matching one regex against another -- which would be two unfalsifiable claims
+    about each other. The three sources name one family three ways (`icons` /
+    `iconN` / `icon{N}`); `derive_schema.py` folds those when it diffs this table
+    against the viewer, so nothing here has to.
+    """
+
+    template: str
+
+    @property
+    def pattern(self) -> str:
+        prefix, _, suffix = self.template.partition("{N}")
+        return f"^{re.escape(prefix)}\\d+{re.escape(suffix)}$"
+
+    def accepts(self, key: str) -> bool:
+        return bool(re.fullmatch(self.pattern, key))
+
+
+#: Per-type generated control families, keyed by the type that produces them.
+SHADER_PARAM_FAMILIES: Dict[ShaderType, ParamFamily] = {
+    ShaderType.ICONMAP: ParamFamily(template="icon{N}"),
+}
+
+
+def accepts_param(shader_type: Union[ShaderType, str], key: str) -> bool:
+    """Whether a layer of `shader_type` may carry the param `key`.
+
+    The single answer to a question three call sites used to each reimplement --
+    and each was free to drift. Union of the two sources, because each carries
+    something the other structurally cannot: the hand table states what we have
+    reviewed and chosen to emit, the generated contract knows what the viewer
+    declares under spellings (`edgeThickness` beside `outer_color`) and shapes
+    (one control per class interval) no fixed list can hold.
+    """
+    key_type = _coerce_shader_type(shader_type)
+    if key in allowed_params(key_type) or key.startswith(FILTER_PARAM_PREFIX):
+        return True
+    family = SHADER_PARAM_FAMILIES.get(key_type)
+    if family and family.accepts(key):
+        return True
+    return contract.accepts_layer_param(key_type.value, key)
+
+
+def declared_params(shader_type: Union[ShaderType, str]) -> frozenset:
+    """Every param name a layer of this type accepts, spelled as the sources spell it.
+
+    The list an error message prints, so it has to be a *union* like
+    `accepts_param` is -- a message that says "declares [threshold]" while
+    `accepts_param` also permits `thresholdLow` teaches the reader to ignore the
+    message. Generated families appear as their template (`icon{N}`), since their
+    members are per-slide and no fixed list of them exists to print. `use_*`
+    filter flags are accepted by prefix rather than by name, so they are not
+    listed here; the caller says so in prose.
+    """
+    key = _coerce_shader_type(shader_type)
+    names = set(allowed_params(key))
+    names.update(contract.layer_field_names(key.value))
+    names.update(contract.layer_param_aliases(key.value))
+    family = SHADER_PARAM_FAMILIES.get(key)
+    if family:
+        names.add(family.template)
+    return frozenset(names)
+
+
 #: Layers whose colour palette size is pinned to `threshold.breaks.length + 1`
 #: by the `colormap_class_count` control coupling.
 PALETTE_COUPLED_TYPES = frozenset({ShaderType.COLORMAP, ShaderType.GRIDHEATMAP})
@@ -197,7 +287,16 @@ class UnknownShaderTypeError(ValueError):
 
 
 def allowed_params(shader_type: Union[ShaderType, str]) -> frozenset:
-    """Params a layer of `shader_type` may carry, including the shared `opacity`."""
+    """Params a layer of `shader_type` may carry, including the shared `opacity`.
+
+    `SHADER_PARAMS` is the runtime answer on purpose. The generated contract
+    holds the same list parsed from the viewer, and `derive_schema.py --check`
+    fails if the two disagree in either direction -- but a check only has teeth
+    if both sides are independent, so the hand table is not a view onto the
+    artifact. What the artifact knows and this table does not (camel/snake spellings,
+    generated control families, the `ui` param tree) arrives through
+    `accepts_param`, which consults both.
+    """
     key = _coerce_shader_type(shader_type)
     return SHADER_PARAMS[key] | COMMON_PARAMS
 
@@ -465,17 +564,19 @@ class ShaderConfig:
         if not 0.0 <= float(self.opacity) <= 1.0:
             errors.append(f"Opacity {self.opacity} outside 0..1")
 
-        declared = allowed_params(self.shader_type)
         unknown = sorted(
-            key
-            for key in self.param_values()
-            if key not in declared and not key.startswith("use_")
+            key for key in self.param_values() if not accepts_param(self.shader_type, key)
         )
         if unknown and self.strict_params:
+            family = SHADER_PARAM_FAMILIES.get(self.shader_type)
+            plus_family = (
+                f" plus the generated family {family.pattern!r}" if family else ""
+            )
             errors.append(
                 f"Params not declared by '{self.shader_type.value}': {unknown}. "
-                f"Declared: {sorted(declared)}. xOpat v3 drops undeclared params without "
-                "warning, so the layer would silently use its defaults."
+                f"Declared: {sorted(allowed_params(self.shader_type))}{plus_family}. "
+                "xOpat v3 drops undeclared params without warning, so the layer would "
+                "silently use its defaults."
             )
         elif unknown:
             warnings.warn(
