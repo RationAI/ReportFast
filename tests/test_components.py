@@ -242,6 +242,63 @@ def test_legacy_viewer_name_still_builds_a_card():
 # ── grid ────────────────────────────────────────────────────────────────────
 
 
+def test_no_element_id_appears_twice_in_a_page():
+    """Every id on a page names one element.
+
+    Found by someone reading a 159-card report: `Report` stamped its `rf-block`
+    wrapper with `block.id` while every frozen component also puts `id=self.id` on
+    its own root, so each block produced two nested elements with the same id --
+    invalid HTML, and an anchor whose target is whichever of the two a browser
+    picks. Asserted over the whole page rather than per component, because the bug
+    lived in the *wrapper*, so no component's own output looked wrong.
+    """
+    import collections
+    import re
+
+    report = Report(
+        title="ids",
+        blocks=[
+            SlideGrid([session()], endpoint=endpoint(), title="slides"),
+            Prose("prose"),
+            Section(title="section", blocks=[Prose("nested"), Prose("also nested")]),
+        ],
+    )
+    html = report.to_html()
+    ids = re.findall(r'id="([^"]+)"', html)
+    duplicated = {name: n for name, n in collections.Counter(ids).items() if n > 1}
+    assert not duplicated, f"ids on more than one element: {duplicated}"
+    # And not merely unique: every block still has its anchor. A fix that deleted
+    # ids would pass the assertion above while making deep-links impossible.
+    for block in list(report.blocks) + list(report.blocks[2].blocks):
+        assert ids.count(block.id) == 1, f"{block.id} appears {ids.count(block.id)}x"
+
+
+def test_a_block_that_renders_no_id_still_gets_its_anchor():
+    """The other half of the wrapper rule: the id is dropped only when redundant.
+
+    A raw FastHTML tree and a block whose `render()` raises both produce a root with
+    no id on it. There the wrapper is the only element that can carry the anchor, so
+    stamping it is required, not redundant.
+    """
+    import re
+
+    from report_fast.core import BaseComponent, _wrap
+
+    class Boom(BaseComponent):
+        component_type = "boom"
+
+        def render(self):
+            raise RuntimeError("no component survives this")
+
+    raw = _wrap(Div("bare tree"))
+    boom = Boom()
+    html = Report(title="ids", blocks=[raw, boom]).to_html()
+    ids = re.findall(r'id="([^"]+)"', html)
+    assert ids.count(raw.id) == 1, ids
+    assert ids.count(boom.id) == 1, f"a failed block lost its anchor: {ids}"
+    assert "rf-error" in html, "the failed block should still render the error card"
+
+
 def test_grid_lays_out_one_card_per_session():
     grid = SlideGrid(
         [

@@ -32,7 +32,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Union
+from typing import Any, Iterable, List, Optional, Sequence, Union
 
 from fasthtml.common import (
     FT,
@@ -250,7 +250,7 @@ class Report:
                     f"{type(block).__name__} failed to render: {exc}",
                     cls="rf-error",
                 )
-            rendered.append(Div(out, cls="rf-block", id=block.id))
+            rendered.append(_block_div(out, block.id))
         return Main(*head, *rendered, cls="rf-main")
 
     def collect_css(self) -> str:
@@ -310,6 +310,45 @@ def _wrap(node: Union[FT, BaseComponent]) -> BaseComponent:
     return _RawBlock(node)
 
 
+def _block_div(rendered: FT, block_id: str) -> FT:
+    """The `rf-block` wrapper around one rendered block.
+
+    It carries the block's id *only* when the rendered block did not. Every frozen
+    component puts `id=self.id` on its own root, so stamping it on the wrapper too
+    put the same id on two nested elements -- invalid HTML, and an anchor whose
+    target is whichever of the two a browser feels like. The wrapper is still
+    stamped for a block that renders no id, which covers the error card a failed
+    block degrades to and any component outside the frozen set, so no block loses
+    its anchor and no page gains a duplicate.
+    """
+    if _carries_id(rendered, block_id):
+        return Div(rendered, cls="rf-block")
+    return Div(rendered, cls="rf-block", id=block_id)
+
+
+def _carries_id(node: Any, wanted: str) -> bool:
+    """Whether a rendered tree already puts `wanted` on one of its elements.
+
+    Whole subtree, not just the root: a component that carries its id on a nested
+    element has the same anchor either way, and testing only the root would put the
+    id back on the wrapper and recreate the duplicate this avoids.
+
+    Defensive about node types because `render()` may return anything FastHTML
+    accepts — `NotStr` raw HTML has no `attrs` to read, and a block that fails to
+    render returns a plain error `Div`.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        attrs = getattr(current, "attrs", None)
+        if isinstance(attrs, dict) and attrs.get("id") == wanted:
+            return True
+        children = getattr(current, "children", None)
+        if children:
+            stack.extend(children)
+    return False
+
+
 def _stylesheets(component: BaseComponent) -> Iterable[str]:
     """Every stylesheet in a component's tree, outermost first."""
     queue = [component]
@@ -367,10 +406,7 @@ class Section(BaseComponent):
 
     def render(self) -> FT:
         body = Div(
-            *[
-                Div(block.render(), cls="rf-block", id=block.id)
-                for block in self.blocks
-            ],
+            *[_block_div(block.render(), block.id) for block in self.blocks],
             cls="rf-section-body",
         )
         if self.collapsible:
