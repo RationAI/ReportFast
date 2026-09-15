@@ -482,6 +482,18 @@ anything about its inputs or not), and provenance lives in a sidecar:
   document, not 300 instantiations). What the sidecar can never contain is
   anything the CLI did not see: the agent's reasoning stays in the transcript,
   which is why "keep the spec?" remains a question worth asking once;
+- **`design` is a claim the caller makes, not a fact the tool derives.** The field
+  existed, `provenance.design_of()` was correct, `record_provenance` passed it —
+  and nothing ever set it, so every sidecar on disk said `design: null`. The
+  reason was structural rather than careless: by the time a page is composed the
+  library cannot know which design its sessions came from, because a bound session
+  carries its DataIDs and no note of its parent. So `build --design` names it
+  (ruling, 2026-09-15), gated as authored on the way in, with `--slot` recorded
+  because the same JSON bound two ways is two different reports. It **binds
+  nothing** on either command — that ruling predates the flag and survives it,
+  since a flag that could express the loop would need the case-list file the
+  default flow was ruled not to leave behind. What the tool cannot check is whether
+  the folder really was bound from that design, and the record does not pretend to;
 - a publish logs the sidecar beside the report when there is no manifest to log —
   and logs it *alongside* `manifest.yaml` + `plan.json` when there is one, since
   the three answer three different questions (what was meant / what resolved / what

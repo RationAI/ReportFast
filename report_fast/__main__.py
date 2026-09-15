@@ -10,6 +10,8 @@ instead of a YAML file and persists nothing but the HTML:
 
     reportfast plan  --design /tmp/x/design.json --slot 0=slide --slot 1=mask
     reportfast build --sessions-dir /tmp/x/sessions -o /tmp/x/report.html
+    reportfast build --sessions-dir /tmp/x/sessions --design /tmp/x/design.json \
+                     --slot 0=slide --slot 1=mask   # the same, and records the design
     reportfast build --sessions-dir /tmp/x/sessions --publish --run RUN  # run only
 
 A published build with no ``-o`` writes nothing here: ``--run`` named the
@@ -19,10 +21,12 @@ in is not this tool's call. ``-o`` asks for the local copy as well as the run's.
 The split between them is the ruling that prompt mode entered through: **one**
 session design is hand-authored, the 300 instances come from a Python loop
 (:func:`report_fast.compose.expand`), and this CLI is the door the finished
-sessions walk through. ``--design`` therefore *validates* a design and prints its
-slots; it does not bind anything, because a command line that could express the
-loop would be a second, worse ``expand()`` and would need a case-list file — the
-kind of intermediate the default flow was ruled not to leave behind.
+sessions walk through. ``--design`` therefore *never binds* anything, on either
+command: on ``plan`` it validates one design and prints its slots, and on
+``build`` it names the design the folder was bound from so the sidecar can record
+it. Neither reading binds, because a command line that could express the loop
+would be a second, worse ``expand()`` and would need a case-list file — the kind
+of intermediate the default flow was ruled not to leave behind.
 
 Each command's blast radius is the point of the split. ``plan`` resolves every
 source and prints what the report would contain, and cannot write: it is the
@@ -247,7 +251,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="as_json",
         help="machine-readable plan: cases, coverage, sources, warnings",
     )
-    _add_authoring(plan, design=True)
+    _add_authoring(plan, design=DESIGN_ON_PLAN)
     plan.set_defaults(func=_plan)
 
     build = commands.add_parser(
@@ -289,7 +293,7 @@ def _parser() -> argparse.ArgumentParser:
         metavar="RUN_ID",
         help="publish into this run instead of the manifest's publish:",
     )
-    _add_authoring(build)
+    _add_authoring(build, design=DESIGN_ON_BUILD)
     build.add_argument(
         "--layout",
         default="grid",
@@ -387,14 +391,26 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_authoring(parser: argparse.ArgumentParser, *, design: bool = False) -> None:
+#: `--design` means two different things, and the help line is the only place a
+#: caller finds out which one they are holding. On `plan` it gates a design and
+#: binds nothing; on `build` it *names* the design the bound sessions came from, so
+#: the sidecar can record one instead of `null`. Same flag, same spelling, because
+#: the two commands are the two halves of one flow -- check the design, then build
+#: from what binding it produced.
+DESIGN_ON_PLAN = "gate one authored design and print its slots; binds nothing"
+DESIGN_ON_BUILD = (
+    "name the design these sessions were bound from, for the sidecar; binds nothing"
+)
+
+
+def _add_authoring(parser: argparse.ArgumentParser, *, design: str = "") -> None:
     """The door sessions arrive through when no manifest exists.
 
     `--sessions-dir` takes a folder of session JSON: one file per case, each read
     through the agent's gate (an off-allowlist key is an error here, named by its
-    JSON path and its filename). `--design` takes *one* design and stops at
-    validation, which is what step 4's ruling leaves the CLI able to do -- see
-    this module's docstring.
+    JSON path and its filename). `--design` is passed as the help line for the
+    command asking for it -- empty means this command does not offer the flag --
+    because what the flag *does* differs between them; see `DESIGN_ON_PLAN`.
 
     Both live on `plan` as well as `build` for the same reason the manifest does:
     an agent needs to be able to check itself before it produces anything.
@@ -418,7 +434,7 @@ def _add_authoring(parser: argparse.ArgumentParser, *, design: bool = False) -> 
             "--design",
             default=None,
             metavar="PATH_OR_JSON",
-            help="check one authored session design and print its slots; binds nothing",
+            help=design,
         )
         parser.add_argument(
             "--slot",
@@ -606,22 +622,32 @@ def _plan_design(args: argparse.Namespace) -> int:
         f"    design = compose.load_design({rows['design']!r}, "
         f"slots={{{', '.join(f'{i}: {n!r}' for i, n in sorted(template.slots.items()))}}})\n"
         "    sessions = [design.bind(slide=p, name=Path(p).stem) for p in slides]\n"
-        "then point --sessions-dir at the result, or compose directly."
+        "then point --sessions-dir at the result, or compose directly.\n"
+        "Repeating --design on the build records it; the build does not bind."
     )
     return 0
 
 
-def _authoring_given(args: argparse.Namespace) -> str:
+def _authoring_given(args: argparse.Namespace, *, design_records: bool = False) -> str:
     """Which non-manifest door was asked for: `design`, `sessions` or ``.
 
     Raises on two at once rather than picking one by precedence: `--design` and
     `--sessions-dir` are two different questions ("is my design sound" versus "here
     are the finished sessions") and a build that answered both silently would be
     reporting on one of them.
+
+    `design_records` is `build`'s reading of the pair, and it means one thing
+    there: the sessions in the folder came *from* this design, so name the design
+    in the sidecar. `plan` has no use for it -- a plan reports what resolved, and a
+    design on its own resolves nothing -- which is why the flag still binds nothing
+    anywhere. The binding stays in Python, where a loop over 300 slides can be
+    seen; the CLI is only told what the loop was given.
     """
     design = bool(getattr(args, "design", None))
     sessions = bool(args.sessions_dir or getattr(args, "sessions", None))
     if design and sessions:
+        if design_records:
+            return "sessions"
         raise UsageError(
             "--design checks one design and binds nothing; --sessions-dir builds "
             "from finished sessions. Run them as two commands."
@@ -645,13 +671,17 @@ def _build(args: argparse.Namespace) -> int:
         )
         return USAGE_ERROR
 
-    if _authoring_given(args) == "design":
+    # `design_records` because on this command `--design` beside sessions means
+    # "these came from it", not "bind it" -- see `_authoring_given`.
+    given = _authoring_given(args, design_records=True)
+    if given == "design":
         raise UsageError(
-            "--design validates a design and binds nothing, so it builds no report. "
-            "Run `reportfast plan --design …` to check it, then bind it in Python "
-            "(report_fast.compose.expand) and build from --sessions-dir."
+            "--design on its own validates a design and binds nothing, so it builds "
+            "no report. Run `reportfast plan --design …` to check it, bind it in "
+            "Python (report_fast.compose.expand), then build from --sessions-dir "
+            "and repeat --design there so the record names the design."
         )
-    if _authoring_given(args) or args.emit_manifest:
+    if given or args.emit_manifest:
         return _build_composition(args)
     if not args.manifest:
         print(
@@ -828,6 +858,13 @@ def _composition(args: argparse.Namespace):
     `--sessions-dir` and `--session` are the same list, concatenated in the order
     they were given, because the grid's order is the report's order and a folder
     read in an arbitrary order is a report that changes between runs.
+
+    `--design` alongside them is the record of where those sessions came from. It
+    is gated as authored here, so a typo in the design stops the build rather than
+    turning into a sidecar that misdescribes the page -- and it is *only* kept as a
+    record, never used to re-derive the sessions. The binding already happened, in
+    the loop that wrote the folder; re-binding here would produce a second answer
+    and leave the page built from the first.
     """
     from .compose import Composition, load_session, sessions_from_dir
 
@@ -839,11 +876,40 @@ def _composition(args: argparse.Namespace):
     if args.sessions_dir:
         sessions += sessions_from_dir(args.sessions_dir, endpoint=endpoint)
 
-    return Composition(
+    composition = Composition(
         title=args.title or "Report",
         subtitle=args.subtitle,
         blocks=_card_blocks(sessions, layout=getattr(args, "layout", None)),
     )
+    if getattr(args, "design", None):
+        composition.design = _design_record(args, endpoint=endpoint)
+    return composition
+
+
+def _design_record(args: argparse.Namespace, *, endpoint):
+    """What `--design` contributes to the sidecar: the design as authored, plus slots.
+
+    Gated through `load_design`, so a design that would not boot is refused here
+    rather than written into a record that then vouches for the page. `--slot`
+    matters on this path for the same reason it matters on `plan`: `{0: slide}` and
+    `{0: slide, 1: mask}` are different reports from one JSON, so the record names
+    which was claimed.
+
+    What it cannot check is whether the folder really was bound from this design --
+    a session file carries its own DataIDs and no note of where they came from. The
+    flag is a claim the caller makes about their own loop, and the record says so
+    by pointing at the design rather than at the sessions.
+    """
+    from .compose import load_design
+    from .provenance import design_of
+
+    template = load_design(
+        args.design,
+        slots=_slots(args),
+        endpoint=endpoint,
+        origin=_origin(args.design, "--design"),
+    )
+    return design_of(template)
 
 
 def _card_blocks(sessions, *, layout=None):

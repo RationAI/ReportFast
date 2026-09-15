@@ -106,8 +106,17 @@ for case in cases:                                  # the 300, from the listing
 ```
 
 ```bash
-reportfast build --sessions-dir $D/sessions --title "Cohort QC" -o $D/report.html
+reportfast build --sessions-dir $D/sessions --design $D/design.json \
+                 --slot 0=slide --slot 1=mask --title "Cohort QC" -o $D/report.html
 ```
+
+Repeat `--design` and `--slot` on the build, exactly as you passed them to
+`load_design`. It does not bind anything — the folder is already bound — it lets the
+sidecar record the one design instead of `null`, which is the difference between a
+report someone can re-run in a year and one they cannot. Omit it and the record says
+`design: null`, which is honest but loses the document you are holding. The record
+carries the design *itself*, not a path to it, so deleting `$D` afterwards costs
+nothing.
 
 `build` re-reads every file through the same gate, prints the plan, writes one HTML
 file plus `report.provenance.json`, and probes every DataID. `--layout rows` (or

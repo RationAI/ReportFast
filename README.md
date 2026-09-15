@@ -107,6 +107,7 @@ reportfast find  <run-id> --path tile_masks    # list what a run's artifacts hol
 # the same three gates, from authored sessions instead of a YAML file:
 reportfast plan  --design $D/design.json --slot 0=slide --slot 1=mask
 reportfast build --sessions-dir $D/sessions --title "Cohort QC" -o $D/report.html
+reportfast build --sessions-dir $D/sessions --design $D/design.json  # + record the design
 reportfast build --sessions-dir $D/sessions --publish --run RUN   # page on the run only
 reportfast build --sessions-dir $D/sessions --emit-manifest   # print, never write
 ```
@@ -122,6 +123,15 @@ case, files per source, what `min_layers:` dropped, and every warning. On
 Python that binds it — it validates one design and binds nothing, because the loop
 over 300 cases is Python and a flag that could express it would need a case-list
 file. `plan` cannot write — there is no flag that makes it.
+
+`--design` means the same thing on `build` and does not bind there either: it
+names the design your loop bound the folder from, so the sidecar records one
+document instead of `null`. Pass `--slot` the way you passed it to `load_design`
+(`{0: slide}` and `{0: slide, 1: mask}` are different reports from one JSON), and
+it is gated on the way in — a design that would not boot stops the build rather
+than landing in a record that vouches for it. What the record cannot check is
+whether the folder really came from that design: a bound session carries its
+DataIDs and no note of its parent, so the flag is a claim about your own loop.
 
 `build` writes the HTML and then asks the tile server about every DataID in it,
 because a report whose links were never resolved is a report nobody has checked:

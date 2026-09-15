@@ -15,8 +15,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import sys
 import tempfile
+import urllib.parse
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -950,15 +952,129 @@ def test_plan_design_offers_the_python_that_binds_it():
     assert "0: 'slide'" in printed, printed  # the slots to paste, default included
 
 
+def test_plan_design_says_the_build_can_record_the_design():
+    """The hint is the only route from this command to the next one. A caller who
+    binds in Python and builds without knowing `--design` exists gets `design:
+    null` and no reason to suspect they lost something."""
+    root = session_root()
+    code, printed, _ = run("plan", "--design", str(root / "design.json"))
+    assert code == 0, printed
+    assert "--design" in printed.split("bind it in Python")[1], printed
+
+
 def test_build_refuses_a_design_because_binding_it_is_not_a_command_line():
     root = session_root()
     code, _, err = run(
         "build", "--design", str(root / "design.json"), "-o", str(root / "r.html")
     )
-    # --design is a plan-only flag, so argparse answers it; the library-level
-    # refusal is asserted in test_the_door_still_refuses_a_design_when_handcoded.
+    # `--design` is now a build flag too, so the refusal comes from `_build` and
+    # not from argparse -- which is why the message has to carry the way forward
+    # rather than just the rule. The library-level refusal is asserted in
+    # `test_the_door_still_refuses_a_design_when_handcoded`.
     assert code == 4
     assert "--design" in err
+    assert "--sessions-dir" in err, "a refusal that dead-ends is a dead end"
+    assert "binds nothing" in err
+
+
+def test_build_records_the_design_the_sessions_were_bound_from():
+    """`--design` beside `--sessions-dir` answers a question the sidecar could not
+    otherwise answer: which one document 300 session files came from.
+
+    The flag is a claim about the caller's own loop -- a bound session carries its
+    DataIDs and no note of its parent -- so what is under test is that the claim is
+    recorded faithfully: the design as authored, and the slots it was claimed with.
+    """
+    root = session_root()
+    out = root / "designed.html"
+    code, printed, err = run(
+        "build", "--sessions-dir", str(root / "sessions"), "--design",
+        str(root / "design.json"), "--slot", "0=slide", "--slot", "1=mask",
+        "-o", str(out), "--no-check",
+    )
+    assert code == 0, (printed, err)
+    record = json.loads((root / "designed.provenance.json").read_text(encoding="utf-8"))
+    assert record["design"] is not None, "the design was silently dropped"
+    assert record["design"]["slots"] == {"0": "slide", "1": "mask"}
+    # As authored: the design's own placeholder DataID, not the bound case's.
+    assert record["design"]["session"]["data"][0]["dataID"] == "/data/x/a.tif"
+
+
+def test_build_without_a_design_records_none_rather_than_inventing_one():
+    """The absence is the answer. A build that was handed finished sessions has no
+    way to know where they came from, and a sidecar that guessed would vouch for a
+    provenance nobody claimed."""
+    root = session_root()
+    code, _, err = run(
+        "build", "--sessions-dir", str(root / "sessions"), "-o",
+        str(root / "plain.html"), "--no-check",
+    )
+    assert code == 0, err
+    record = json.loads((root / "plain.provenance.json").read_text(encoding="utf-8"))
+    assert record["design"] is None
+
+
+def test_build_gates_the_design_it_is_asked_to_record():
+    """A design that would not boot is refused, not written into a record.
+
+    The flag does not gate the page -- the sessions do -- so without this the
+    sidecar would certify a design the viewer cannot open, which is the one thing
+    a record of provenance must not do.
+    """
+    root = session_root()
+    path = root / "hollow.json"
+    path.write_text(json.dumps({"params": {}, "data": [{}]}), encoding="utf-8")
+    code, _, err = run(
+        "build", "--sessions-dir", str(root / "sessions"), "--design", str(path),
+        "-o", str(root / "h.html"), "--no-check",
+    )
+    assert code == 1, err
+    assert "dataID" in err, err
+    assert not (root / "h.html").exists(), "a refused design still wrote a page"
+
+
+def test_the_design_a_build_records_does_not_rewrite_the_sessions():
+    """`--design` is a record and not an input: the page links the folder's
+    sessions, whatever the design's own slots happen to hold."""
+    root = session_root()
+    out = root / "keep.html"
+    code, _, err = run(
+        "build", "--sessions-dir", str(root / "sessions"), "--design",
+        str(root / "design.json"), "-o", str(out), "--no-check",
+    )
+    assert code == 0, err
+    page = out.read_text(encoding="utf-8")
+    for name in ("case-01", "case-02"):
+        assert name in page, f"{name} left the page once --design was named"
+    # The links carry the bound cases' DataIDs -- mount root stripped, as a DataID
+    # is defined -- and not the design's own placeholder. That is the whole claim:
+    # naming a design must not change what the page points at.
+    decoded = [
+        urllib.parse.unquote(url.split("#", 1)[1])
+        for url in re.findall(r'href="([^"]*)"', page)
+        if "/v3/#" in url
+    ]
+    assert decoded, "the page links no sessions"
+    assert any("case-01/s.tif" in payload for payload in decoded), decoded[0][:120]
+    assert not any("/data/x/a.tif" in payload for payload in decoded), (
+        "the design's placeholder reached the page; --design is a record, not an input"
+    )
+
+
+def test_a_slot_the_design_lacks_is_refused_by_the_build_that_records_it():
+    """`--slot` is part of the claim on this path, so a slot naming an index the
+    design does not have is a wrong spec -- exit 1, the same answer `plan` gives.
+
+    Without this the record would claim `{5: nope}` had produced the page.
+    """
+    root = session_root()
+    code, _, err = run(
+        "build", "--sessions-dir", str(root / "sessions"), "--design",
+        str(root / "design.json"), "--slot", "5=nope", "-o", str(root / "s.html"),
+        "--no-check",
+    )
+    assert code == 1, err
+    assert "data[5]" in err and "2 data entries" in err, err
 
 
 def test_the_door_still_refuses_a_design_when_handcoded():
