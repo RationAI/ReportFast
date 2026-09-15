@@ -10,8 +10,45 @@ viewer boots from — the same JSON your colleague pastes into chat — and turn
 into a link. The rest of the tool is optional: components that put sessions on a
 page, and defaults for people who just have paths.
 
+Two ways to use it, and the first is the default:
+
+**Ask.** You (or an agent) author one xOpat session document, the library validates
+it against the viewer's own schema, a Python loop binds it to your cases, and one
+command turns the result into a page. Nothing is kept except the HTML and a
+provenance sidecar beside it.
+
 ```bash
 uv sync --extra all
+D=$(mktemp -d); mkdir -p $D/sessions
+$EDITOR $D/design.json                    # one session; see skills/reportfast/SKILL.md
+uv run reportfast plan --design $D/design.json --slot 0=slide --slot 1=mask
+```
+
+`plan` prints the slots, what the endpoint resolves to, and the Python that binds
+the design to your case list — which is the step in the middle, and is Python
+because a loop over 300 cases does not fit in a flag:
+
+```python
+import json
+from pathlib import Path
+from report_fast import load_design
+
+design = load_design(f"{D}/design.json", slots={0: "slide", 1: "mask"})
+for name, slide, mask in cases:            # from your listing, not from a guess
+    session = design.bind(slide=slide, mask=mask, name=name)
+    Path(f"{D}/sessions/{name}.json").write_text(json.dumps(session.to_config()))
+```
+
+```bash
+uv run reportfast build --sessions-dir $D/sessions -o $D/report.html
+```
+
+**Write it down.** A YAML manifest resolves slide and mask folders (or MLflow runs)
+for you, applies `only:` and `min_layers:`, and is a file a colleague can diff,
+review and re-run. That is worth keeping when a report is standing infrastructure,
+and is not worth a one-off answer to a question.
+
+```bash
 uv run reportfast plan  manifests/dysplasia.yaml   # writes nothing; read this first
 uv run reportfast build manifests/dysplasia.yaml   # one HTML file, then probes
 xdg-open reports/dysplasia.html
@@ -25,50 +62,74 @@ path is wrong, so copying it and running `plan` is the whole tutorial.
 
 ## The command line
 
-Three commands, three different blast radii. `reportfast` is installed by the
-package (`uv sync --extra manifest` is enough for local folders); `uv run
-reportfast …` works in this checkout.
+Three commands, three different blast radii, and two doors each: a manifest path,
+or authored sessions. `reportfast` is installed by the package (`uv sync --extra
+manifest` is enough for local folders); `uv run reportfast …` works in this
+checkout.
 
 ```bash
 reportfast plan  reports/foo.yaml              # resolve and report; writes nothing
 reportfast build reports/foo.yaml              # write the HTML, then probe every DataID
 reportfast build reports/foo.yaml --publish    # the only write to MLflow
 reportfast find  <run-id> --path tile_masks    # list what a run's artifacts hold
+
+# the same three gates, from authored sessions instead of a YAML file:
+reportfast plan  --design $D/design.json --slot 0=slide --slot 1=mask
+reportfast build --sessions-dir $D/sessions --title "Cohort QC" -o $D/report.html
+reportfast build --sessions-dir $D/sessions --publish --run RUN
+reportfast build --sessions-dir $D/sessions --emit-manifest   # print, never write
 ```
 
+The door changes what is read, not what is checked: every session walks the same
+gate, the same components are composed, the same probe runs, the same exit codes
+come back, and both doors write the same pair of files. Two build paths that "both
+probe" is how one of them stops probing, so they literally share the code.
+
 `plan` is the artifact worth reading before a build: cases per layer, layers per
-case, files per source, what `min_layers:` dropped, and every warning. It cannot
-write — there is no flag that makes it. `build` writes one file and then asks the
-tile server about every DataID in it, because a report whose links were never
-resolved is a report nobody has checked: the viewer loads, the card is black, and
-nothing anywhere reports an error. Publishing is `--publish` and nothing else —
-not a `publish:` key in the manifest, not CI — and it repeats the run id back
-before uploading.
+case, files per source, what `min_layers:` dropped, and every warning. On
+`--design` it prints the design's slots, what the endpoint will resolve to, and the
+Python that binds it — it validates one design and binds nothing, because the loop
+over 300 cases is Python and a flag that could express it would need a case-list
+file. `plan` cannot write — there is no flag that makes it.
+
+`build` writes the HTML and then asks the tile server about every DataID in it,
+because a report whose links were never resolved is a report nobody has checked:
+the viewer loads, the card is black, and nothing anywhere reports an error.
+Publishing is `--publish` and nothing else — not a `publish:` key in the manifest,
+not CI — and it repeats the run id back before uploading. From the manifest-less
+door it needs `--run`, because there is nothing to infer a destination from.
 
 | Exit | Meaning |
 | --- | --- |
 | `0` | fine |
-| `1` | the manifest is wrong: a bad key, a missing case, a layer that lands on nothing |
+| `1` | the *spec* is wrong: a bad manifest key, a missing case, a layer that lands on nothing, or an authored session the viewer would not load as written |
 | `2` | the HTML was written and a DataID did not resolve |
 | `3` | an optional extra this command needs is not installed |
-| `4` | nothing to work on: no such manifest, no such run, no command, bad flag |
+| `4` | nothing to work on: no such manifest, no such folder, no such run, no command, bad flag |
 
-1 and 2 are different failures with different fixes — one is a line in a YAML
-file, the other is a run id or a mount that is wrong — so they do not share a
-code, and neither is argparse's default 2.
+1 and 2 are different failures with different fixes — one is a line in a file you
+can edit, the other is a run id or a mount that is wrong — so they do not share a
+code, and neither is argparse's default 2. 1 and 4 are split for the same reason:
+a folder that is not there is an errand, a session the viewer would drop is a
+mistake to go and fix in that one file, and a CI job should not have to read the
+message to tell them apart.
 
 Endpoint flags work on `plan` and `build` (`--base-url`, `--wsi-base-url`,
 `--image-protocol`, `--mount-root`) and beat both the manifest's `endpoint:` and
 the environment, which is what lets one manifest be aimed at a second deployment
 without editing it. `build` takes `-o/--out`, `--no-check`, `--check-only`
-(probe, write nothing) and `--run` (publish somewhere other than the manifest's
-`publish:`).
+(probe, write nothing — not the HTML, not the sidecar), `--run` (where to publish),
+and on the authored door `--layout grid|rows` / `--no-grid`. A block's name is the
+component's own (`SlideGrid`), not the manifest's snake_case (`slide_grid`), and the
+error says so rather than telling you to invent a component.
 
-## Three ways in
+## Four ways in
 
-The CLI is the same machinery as these three calls; a manifest is
-`build_report()` written down. Read [manifest.py](report_fast/manifest.py) for
-the vocabulary and `manifests/example.yaml` for a file to copy.
+The CLI is the same machinery as these four calls; a manifest is `build_report()`
+written down, and a `Composition` is a manifest held in memory instead. Read
+[manifest.py](report_fast/manifest.py) for the manifest vocabulary,
+[compose.py](report_fast/compose.py) for the in-memory one, and
+`manifests/example.yaml` for a file to copy.
 
 **Just paths.** Backgrounds in, report out:
 
@@ -127,6 +188,30 @@ session = XopatSession.from_config({"data": [...], "background": [...]})
 
 SlideCard(session).to_html()
 ```
+
+**Your own design, bound many times.** The agent path, and the one the CLI's
+`--sessions-dir` door is for. One hand-written session document with slots; N
+bindings; a composition; one file out.
+
+```python
+from report_fast import Composition, load_design
+
+design = load_design(
+    f"{D}/design.json", slots={0: "slide", 1: "mask"}, endpoint=endpoint
+)   # audited strictly, once; every bind below inherits that verdict
+
+page = Composition(title="Cohort QC", blocks=[])
+for case in cases:
+    page.blocks.append({"SlideCard": {"session": design.bind(
+        slide=case.slide, mask=case.mask, name=case.name,
+    )}})
+built = page.build(out=f"{D}/report.html")     # writes, probes, records
+```
+
+The design is written by hand. `load_design` is the gate that makes that safe:
+`data[]` is positional, so the audit resolves every `dataReference` /
+`dataReferences` index and refuses one that is out of range, which is the mistake a
+300-case copy-paste eventually makes.
 
 Both paths end at the same `XopatSession`, so code you write yourself and code
 that goes through this package emit the same links.
@@ -197,11 +282,18 @@ report.add(Chart.from_matplotlib(fig))
 report.write("report.html")
 ```
 
-Components in the box: `Prose`, `Heading`, `Bullets`, `LinkList`, `RawHtml`,
-`SlideCard`, `SlideGrid`, `MetricTable`, `Chart`, and `Section` for grouping.
-They take sessions and plain data — no database, no metric store, no slide
-reader. Collapsing is `<details>`; the only interactivity is the viewer behind
-the link.
+Components in the box: `Prose`, `Heading`, `Bullets`, `LinkList`, `SlideCard`,
+`SlideGrid`, `MetricTable`, `Chart`, `Section`, `Report`. They take sessions and
+plain data — no database, no metric store, no slide reader. Collapsing is
+`<details>`; the only interactivity is the viewer behind the link.
+
+Those ten are also the **frozen set**, and that is a rule rather than a list: on
+the authored path, page HTML comes from them and nowhere else, so the same
+composition renders the same page every time it is built. `RawHtml` exists — it is
+how a manifest keeps a human's hand-written block — but it is refused **by code**
+on the agent path, including `Prose(text="<div …>")` and nested specs. The gate is
+[frozen.py](report_fast/frozen.py); `reportfast` refuses with the constructor's own
+signature, because "wrong keyword" is not actionable without the right ones.
 
 Your own component is a subclass with two methods:
 
@@ -225,6 +317,30 @@ class Finding(BaseComponent):
 
 Pick your own class prefix: `.rf-note`, `.rf-card` and the rest are already taken
 by the components in the box, and their stylesheets land on the same page.
+
+## What a build leaves behind
+
+Two files, and nothing else:
+
+```
+report.html                 the report
+report.provenance.json      what it was built from
+```
+
+The sidecar records the endpoint the links were built against, the viewer version
+and commit the schema was derived from, the tool version, what the build was given
+(a folder, a manifest, a layout), every DataID the page links, and — when the
+sessions came from a template — the **design as authored**, one document rather
+than 300 instantiations. It is generated from data that already resolved, never
+from the spec that declared it: the old failure was a published report and its
+logged config disagreeing because one was resolved and one was meant.
+
+It is a *sidecar*, and the trade-off is deliberate and accepted: **nothing is
+stamped into the page**, so no footer, no comment, and **a mailed HTML carries no
+provenance**. The page looks identical whether or not anyone is keeping records
+(that is tested, byte for byte). If a report must be self-explaining wherever it
+goes, deliver the pair, or keep a manifest. See
+[provenance.py](report_fast/provenance.py); both files are gitignored.
 
 ## Runs in MLflow
 
@@ -326,16 +442,27 @@ report_fast/
 ├── core.py         BaseComponent, ComponentRegistry, Report, Section
 ├── build.py        build_report(): paths or masks → report, in one call
 ├── manifest.py     YAML spec → build_report: strict keys, plan, resolve
+├── compose.py      the same composition in memory, and the --sessions-dir door
+├── contract.py     the generated xOpat facts every gate reads (schema/, no copies)
+├── audit.py        one session → findings with JSON paths; the severity split
+├── frozen.py       the ten components the page may be made of, and the gate
+├── provenance.py   report.provenance.json: the record, never the page
+├── schema/         GENERATED from the pinned viewer: session schema, params
+│                   allowlist, layer fields, and the version stamp (viewer.lock.json)
 ├── verify.py       every DataID → the tile server's /info, before a reader does
 ├── mlflow.py       runs: artifacts → DataIDs, report → run (needs the extra)
-├── __main__.py     `reportfast plan | build | find`, and their exit codes
+├── __main__.py     `reportfast plan | build | find`, both doors, and their codes
 └── components/     prose.py · slide_grid.py · metrics.py · chart.py
-manifests/          the reports themselves, as YAML: dysplasia.yaml, example.yaml
+scripts/derive_schema.py  regenerate schema/ from the pinned xOpat checkout, and
+                    refresh the version stamp in the skill
+manifests/          standing reports, as YAML: dysplasia.yaml, example.yaml
 skills/reportfast/  the agent's half: SKILL.md, references/, an example manifest
 examples/           session fixtures: a real viewer export + pasteable demos
 tests/              test_xopat.py · test_session.py · test_masks.py ·
                     test_components.py · test_mlflow.py · test_manifest.py ·
-                    test_verify.py · test_cli.py
+                    test_verify.py · test_cli.py · test_contract.py ·
+                    test_audit.py · test_frozen.py · test_compose.py ·
+                    test_provenance.py
 scripts/            test_report.py, test_mlflow.py, dysplasia_tile_masks.py —
                     demos writing the reports below
 reports/            generated HTML, one per manifest plus the demos
@@ -355,9 +482,14 @@ uv run python tests/test_components.py    # the shell and the components
 uv run python tests/test_mlflow.py        # runs in/out, against a fake client
 uv run python tests/test_manifest.py      # YAML: strict keys, the plan, the three doors
 uv run python tests/test_verify.py        # the probe: DataIDs read back, three answers
-uv run python tests/test_cli.py           # the commands, and what each exit code means
+uv run python tests/test_cli.py           # the commands, both doors, each exit code
+uv run python tests/test_contract.py      # the generated contract, and the skill's copy
+uv run python tests/test_audit.py         # the gate: findings, paths, the severity split
+uv run python tests/test_frozen.py        # the ten components, and what they refuse
+uv run python tests/test_compose.py       # the in-memory composition and the door
+uv run python tests/test_provenance.py    # the sidecar, and that the page is untouched
 uv run pytest tests
-uv run ruff check .
+uv run ruff check --select F,E9,B .
 ```
 
 Every file is also a script — `python tests/test_cli.py` runs it with no pytest
@@ -367,10 +499,14 @@ your tile server is up. It needs no mount and opens no slide.
 
 Two properties are pinned rather than hoped for:
 
-- **Reproducibility.** `build(x.yaml)` twice writes byte-identical HTML — no
-  timestamps, no generated code, fixed key order, and component ids derived from
-  position rather than from a uuid. That is what lets a report be a build artifact
-  you can diff against last week's, instead of a transcript nobody can check.
+- **Reproducibility.** `build(x.yaml)` twice writes byte-identical HTML *and*
+  byte-identical provenance — no timestamps, no generated code, fixed key order,
+  and component ids derived from position rather than from a uuid. That is what
+  lets a report be a build artifact you can diff against last week's, instead of a
+  transcript nobody can check. Note what "same input" means since prompt mode:
+  the page is reproducible by construction, and the sessions are inputs that vary
+  — re-authoring a session may change a colour, and the HTML legitimately differs.
+  Reproducibility is asserted over *(sessions + composition) → HTML*.
 - **Publishing is never a side effect.** A manifest's `publish:` key is a
   destination, not an instruction; the tests assert that a build with a `publish:`
   and no `--publish` uploads nothing, and that `--publish` without a run id stops
@@ -411,7 +547,7 @@ different claims.
 | `…/redirect.php?visualization=<json>` | `…/v3/#<urlencoded json>` (`redirect.php` was deleted upstream) |
 | `dataReference: 0` on a shader layer | `dataReferences: [0]` — the singular key is ignored |
 | `lossless: true` on a visualization | `{"dataID": "…", "options": {"format": "png"}}` on that layer's `data[]` entry |
-| `params.toolBar` | `params.ui.toolBar` (the flat spelling still works, deprecated) |
+| `params.toolBar` | `params.ui.toolBar` — and only `toolBar`/`statusBar`/`scaleBar` still work flat; `appBar`/`globalMenu`/`mainMenu`/`navigator` are stripped by the sanitizer before the fallback ever reads them |
 | `classify` / `segmentation` / `bounding_box` | `colormap` / `colormap` / `iconmap` |
 | inline JS protocol template | the **name** of an entry in the deployment's `slide_protocols` |
 | `viewer.addLayer(...)` JS init | `visualizations[].shaders` |

@@ -246,7 +246,7 @@ notepad is not a persisted artifact):
 | `reportfast plan r.yaml` | resolves sources, prints cases per case, layers per case, per-source file counts, warnings | writes nothing |
 | `reportfast build r.yaml` | writes the HTML, probes every DataID against the tile server | one file, gitignored |
 | `reportfast build --sessions-dir /tmp/x/sessions --layout grid -o /tmp/x/report.html` | the same gate, prompt mode: validate every session through `from_config`, compose the grid, probe | same one file; no manifest exists |
-| `reportfast build r.yaml --publish` | logs `report/report.html` plus the resolved inputs — `manifest.yaml` + `plan.json`, or `provenance.json` | **the only write to MLflow, never implied** |
+| `reportfast build r.yaml --publish` | logs `report/report.html` plus the resolved inputs — `manifest.yaml` + `plan.json` + `provenance.json`, or `provenance.json` alone when there is no manifest | **the only write to MLflow, never implied** |
 
 `plan` exists because an agent needs to be able to check itself without
 producing anything, and because "32 cases, 11 overlays, 0 cases short" is the
@@ -289,9 +289,12 @@ alone, because both rot**, in different directions:
 
 - A link is not context. At build time nothing reads it, and when something
   does, the answer is one web fetch and a guess away. It belongs in the skill as
-  a provenance footer — *"these facts were generated from xOpat `v3.x.y`, commit
-  `abc1234`"* — so a human can re-derive the context when the viewer moves. Not
-  as the source of truth.
+  a stamp — *"these facts were generated from xOpat `v3.x.y`, commit `abc1234`"* —
+  so a human can re-derive the context when the viewer moves. Not as the source of
+  truth. **Amended by decision 8:** the stamp lives in `schema/viewer.lock.json`
+  and in each report's provenance sidecar, *not* in the page — the footer that used
+  to be proposed here was ruled out. The skill's copy of the stamp is generated
+  into `SKILL.md` from the lock, so it cannot drift from the gate.
 - A handwritten summary is context that rots silently. `SKILL.md` prose is
   updated by whoever remembers; the viewer schema is updated by the build. A
   summary drifting a field behind is precisely the failure we are trying to
@@ -307,7 +310,9 @@ skills/reportfast/
 │                         (handwritten — a generated file cannot know this)
 ├── schema/               GENERATED from the pinned viewer source
 │   ├── session.schema.json    the v3 session shape, machine-checkable
-│   └── params-allowlist.json  params/layer/plugin keys the viewer keeps
+│   ├── params-allowlist.json  params/layer/plugin keys the viewer keeps
+│   ├── layer-fields.json      every shader field, by family
+│   └── viewer.lock.json       viewer version, commit, source digests
 └── examples/             golden sessions: the viewer export, the
                           multi-background case, one per common pattern
 ```
@@ -435,7 +440,11 @@ anything about its inputs or not), and provenance lives in a sidecar:
   document, not 300 instantiations). What the sidecar can never contain is
   anything the CLI did not see: the agent's reasoning stays in the transcript,
   which is why "keep the spec?" remains a question worth asking once;
-- a publish logs the sidecar beside the report when there is no manifest to log;
+- a publish logs the sidecar beside the report when there is no manifest to log —
+  and logs it *alongside* `manifest.yaml` + `plan.json` when there is one, since
+  the three answer three different questions (what was meant / what resolved / what
+  the links actually point at); the sidecar is in the manifest's *place* only in
+  the sense that it is what a manifest-less build has instead;
 - the skill's own version stamp (*"schema derived from xOpat `v3.x.y`, commit
   `abc1234`"*) lives in that sidecar and in `schema/`, not in the page.
 
@@ -565,6 +574,12 @@ frozen set enforced by code; session *design* always authored by the agent and
 iterated by `SessionTemplate`; prompt mode enters through the CLI's temp-dir
 door). Ordered by what unblocks the agent; each step ships alone.
 
+Status as of this writing: **0–5 are in** (git, `derive_schema.py`, the session
+gate, the frozen set, `compose.py` + the door, the sidecar), 6–7 are the docs
+catching up. Steps 1–5 are each pinned by their own test module
+(`test_contract` / `test_audit` / `test_frozen` / `test_compose` / `test_provenance`)
+plus CLI tests for the door.
+
 0. **`git init`** — the repo is not one, and decisions 8/10 and the skill's
    whole "committed manifest" story assume it. Plus `.gitignore`
    (`.venv/`, `__pycache__`, `reports/*.html`, `*.provenance.json`). Prerequisite,
@@ -602,7 +617,10 @@ door). Ordered by what unblocks the agent; each step ships alone.
 5. **Provenance sidecar** — `report.provenance.json` written on every build
    (sources, endpoint, schema stamp, tool version, the authored session design
    when a template was used); publish logs it in the manifest's place. The page
-   itself stays untouched.
+   itself stays untouched. **Done** (`report_fast/provenance.py`): `--publish`
+   reaches the manifest-less door too, and the refusal that used to be there is
+   gone; `--run` without `--publish` is still a usage error, since naming a
+   destination is not asking to write to it.
 6. **SKILL.md rewritten** for the new contract: author one session design from
    `schema/` + `examples/` and instantiate with `SessionTemplate`; compose only
    from the frozen set; strict-gate warnings don't exist for you — errors do;
