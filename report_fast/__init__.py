@@ -3,7 +3,7 @@
 Everything here is built on one value object, :class:`XopatSession`, which holds
 the session document the v3 viewer boots from and turns it into a link. Reports
 are collections of components rendered once into a self-contained HTML file --
-no server, no JavaScript, no slide-reading library.
+no server, no JavaScript, no slide-reading library::
 
     from report_fast import XopatSession, SlideCard
 
@@ -19,17 +19,37 @@ reports that live in an MLflow run go through :class:`Mlflow` -- it turns
 artifacts into the DataIDs the tile server addresses rather than downloading
 anything.
 
-The agent path enters through :func:`expand`: one hand-authored xOpat session
+The agent path enters through :func:`load_design`: one hand-authored xOpat session
 design, validated once against the viewer's own schema, then bound per case in a
 plain Python loop, then composed into a page (:class:`Composition`). Nothing in
 that chain needs a manifest and nothing it does not ask for is written to disk::
 
-    from report_fast import expand, Composition
+    from report_fast import Composition, SlideGrid, design_of, load_design
 
-    composition = expand(cases, design="design.json", slots={0: "slide", 1: "mask"})
-    for case in cases:
-        ...
-    composition.build("report.html")
+    template = load_design("design.json", slots={0: "slide", 1: "mask"})
+    sessions = [template.bind(**case) for case in cases]
+    report = Composition(title="QC", blocks=[SlideGrid(sessions=sessions)])
+    report.design = design_of(template)   # so the sidecar names the design
+    report.build(out="report.html")
+
+:func:`expand` is the same loop with the failing case named in the error, for when
+300 bindings and one typo is a search you would rather not do::
+
+    from report_fast import expand
+
+    sessions = expand("design.json", cases, slots={0: "slide", 1: "mask"})
+
+Design it takes first, cases second -- both are positional, so passing them the
+other way round raises `TypeError: got multiple values for argument 'design'`
+rather than building the wrong thing. Either way `expand` returns *sessions*, not
+a page: the `Composition` above is what turns them into one, and it is what
+carries `.build()`.
+
+Setting `report.design` is what puts the design in the sidecar. Nothing sets it
+for you -- a record of an input is only true if the caller that held the input
+wrote it, and by the time a page is being composed the library can no longer know
+which design the sessions came from. A build that never says leaves `design: null`,
+which is the honest answer rather than a bug in the recording.
 
 Every build also writes `report.provenance.json` beside the HTML -- the record of
 what resolved. Nothing is stamped into the page, so a mailed report carries no
@@ -59,6 +79,7 @@ from .frozen import CompositionError, FROZEN, authorize, violations
 from .provenance import (
     Provenance,
     ProvenanceError,
+    design_of,
     read as read_provenance,
     sidecar_path,
     verify_pair,
@@ -173,6 +194,7 @@ __all__ = [
     # the record every build leaves beside the page
     "Provenance",
     "ProvenanceError",
+    "design_of",
     "read_provenance",
     "sidecar_path",
     "verify_pair",
