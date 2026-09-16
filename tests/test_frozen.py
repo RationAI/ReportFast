@@ -105,6 +105,28 @@ def test_each_entry_is_the_component_its_name_says():
     assert FROZEN["Report"] is Report
 
 
+def test_every_frozen_name_imports_from_the_namespace_a_reader_reaches_for():
+    """A trial run wrote `from report_fast.components import Section` and found
+    nothing, because `Section` and `Report` live in `core` -- and the trial could
+    not know that, since every *other* frozen name is in `components`.
+
+    The set is taught as one list of ten, so it has to be importable as one list
+    from the package named "components". `core` is where the two are defined and
+    stays the canonical home; `components` re-exports them. The guard is over the
+    whole set rather than the two names, so adding an eleventh somewhere else trips
+    it too.
+    """
+    import report_fast
+    import report_fast.components as components
+
+    for name in sorted(FROZEN):
+        assert hasattr(report_fast, name), f"{name} left the top-level surface"
+        assert hasattr(components, name), (
+            f"{name} is in the frozen set but not importable from report_fast.components"
+        )
+        assert getattr(components, name) is FROZEN[name], f"{name} is a different object"
+
+
 def test_the_package_surface_offers_no_component_the_set_does_not():
     # `xOpatViewer` is a deprecated alias of SlideCard and `RawHtml` is the door;
     # neither may be reachable as a block name on this path.
