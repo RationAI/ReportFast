@@ -477,6 +477,41 @@ def test_run_flag_overrides_the_manifest_and_says_which_was_used():
     assert code == 4
 
 
+# ── --version: the line that goes in a bug report ───────────────────────────
+
+
+def test_version_names_the_tool_and_the_viewer_it_was_verified_against():
+    """Two answers to "which version", and a report needs both.
+
+    A session that gates cleanly against viewer 3.1.0 can still be refused by a
+    deployment on a newer commit -- the contract is derived from a viewer checkout,
+    so the tool version alone does not describe what a page was verified against.
+    """
+    code, out, _ = run("--version")
+    assert code == 0, out
+    assert out.startswith("report-fast "), out
+    assert "viewer 3.1.0 @" in out, out
+
+
+def test_version_survives_an_unreadable_contract():
+    """`--version` is what someone types when nothing else works.
+
+    It must not be the one command that dies on a missing contract file, so the
+    stamp is read inside a try and the tool version is printed regardless.
+    """
+    from report_fast import contract
+
+    real = contract.viewer_stamp
+    contract.viewer_stamp = lambda: (_ for _ in ()).throw(FileNotFoundError("gone"))
+    try:
+        code, out, _ = run("--version")
+    finally:
+        contract.viewer_stamp = real
+    assert code == 0, out
+    assert "report-fast " in out
+    assert "unreadable" in out, out
+
+
 # ── find: listing, not discovery ────────────────────────────────────────────
 
 

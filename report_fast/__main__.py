@@ -216,6 +216,34 @@ class _Usage(Exception):
     """Bad command line. Carried as an exception so `main` owns the exit code."""
 
 
+class _VersionAction(argparse.Action):
+    """Print the tool version and the viewer it was verified against.
+
+    Both halves belong on one line because both belong in a bug report. "Which
+    version" has two answers here: what built the page, and which viewer the
+    contract was derived from -- a session that gates cleanly against 3.1.0 can be
+    refused by a viewer on a newer commit, and the report alone does not say so.
+
+    The stamp is read defensively. `--version` is the command someone reaches for
+    when nothing else works, so it must not be the one command that dies on a
+    missing or unreadable contract file; the tool version is printed either way.
+    """
+
+    def __call__(self, parser, namespace, values, option_string=None):  # noqa: D102
+        from .provenance import tool_version
+
+        line = f"report-fast {tool_version()}"
+        try:
+            from .contract import viewer_stamp
+
+            stamp = viewer_stamp()
+            line += f" (viewer {stamp.get('version', '?')} @ {str(stamp.get('commit', ''))[:8]})"
+        except Exception as error:  # noqa: BLE001 - the whole point of the try
+            line += f" (viewer contract unreadable: {type(error).__name__})"
+        print(line)
+        raise SystemExit(0)
+
+
 class UsageError(ValueError):
     """A command line that parses cleanly but asks for two incompatible things.
 
@@ -238,6 +266,12 @@ def _parser() -> argparse.ArgumentParser:
             "HTML. A manifest: `reportfast plan r.yaml` first -- it cannot write "
             "anything, and `build` can."
         ),
+    )
+    parser.add_argument(
+        "--version",
+        action=_VersionAction,
+        nargs=0,
+        help="print the tool version and the viewer it was verified against",
     )
     commands = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -709,14 +743,21 @@ def _build(args: argparse.Namespace) -> int:
 
 
 def _build_composition(args: argparse.Namespace) -> int:
-    """The manifest-less door: authored sessions in, one HTML file out.
+    """The manifest-less door: authored sessions in, a page and a sidecar out.
+
+    "Out" means wherever the flags pointed. With `--publish` and no `-o` nothing
+    is written here at all -- the run is the only destination -- which is why this
+    function hands `build` `out=False` rather than a default filename, and why the
+    tail in `_report_built` says "the run only" instead of printing a path nobody
+    asked for.
 
     Publish is reachable from here, and what it uploads is the provenance sidecar
     in the manifest's place -- there is no manifest to log, so the record of what
     resolved *is* the configuration the run keeps. `Composition.build` still cannot
     publish (no parameter, nothing named publish in that module): building a report
     has never implied uploading one, and the door keeps that by calling MLflow
-    itself, one step after the file exists.
+    itself, after the page exists or, when nothing local was asked for, instead of
+    it.
     """
     _publish_flags(args)
 
