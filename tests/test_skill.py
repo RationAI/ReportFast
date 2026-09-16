@@ -24,7 +24,7 @@ import re
 import shutil
 import sys
 import tempfile
-import tomllib
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -63,6 +63,15 @@ def test_the_wheel_target_matches_where_the_code_looks():
     wheel, because the failure this prevents is silent: the checkout keeps working,
     the install does not, and only someone in another project finds out.
     """
+    # `tomllib` is 3.11+; the package supports 3.10, where this one check cannot
+    # run (and `config.py` says so out loud for TOML presets for the same reason).
+    # Skipped rather than dropped: the 3.12 leg of CI still runs it, and the
+    # failure it prevents -- an install that silently ships no skill -- is silent
+    # only on a machine someone else is using.
+    try:
+        import tomllib
+    except ImportError:
+        raise unittest.SkipTest("tomllib needs Python 3.11+") from None
     config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     included = config["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
     assert included.get("skills/reportfast") == "report_fast/skill", included
@@ -349,12 +358,22 @@ if __name__ == "__main__":
         if name.startswith("test_") and callable(made)
     ]
     failed = 0
+    skipped = 0
     for name, made in every:
         try:
             made()
             print(f"ok   {name}")
+        except unittest.SkipTest as skip:
+            # A skip is not a failure and must not print as one: this file runs
+            # standalone on 3.10, where the tomllib check cannot run at all, and a
+            # red line for something the interpreter cannot do teaches people to
+            # ignore the red lines.
+            skipped += 1
+            print(f"skip {name}: {skip}")
         except Exception as error:  # noqa: BLE001 - the runner's whole job
             failed += 1
             print(f"FAIL {name}: {type(error).__name__}: {error}")
-    print(f"\n{len(every) - failed}/{len(every)} passed")
+    ran = len(every) - skipped
+    tail = f" ({skipped} skipped)" if skipped else ""
+    print(f"\n{ran - failed}/{ran} passed{tail}")
     raise SystemExit(1 if failed else 0)
