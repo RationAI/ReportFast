@@ -38,19 +38,26 @@ background:
 # files are listed, never downloaded: each becomes the DataID the tile server
 # addresses it by, mflow/<experiment>/<run>/artifacts/<path>. Check what is under
 # a run before naming it: `reportfast find <run-id> --path <dir>`.
+#
+# The run row is commented out because this file's job is to plan on the first
+# try, and it cannot do that with a run in it: an MLflow run holds *its* cases, so
+# unless your slides happen to be the ones that analysis ran on, the run's stems
+# match none of them and the gate stops the build -- correctly, but on someone's
+# tutorial. Uncomment it when your backgrounds and your masks come from the same
+# job, which is the normal case for a real report and the reason the row is here.
 masks:
   - name: Tissue
     drive: /mnt/data/example/tissue_masks
     color: "#ffff00"
     opacity: 0.5
 
-  - name: Annotations
-    run: 41d5e1d7d43641ea8f645f9b7945e9f7
-    path: annot_masks
-    classes: 3
-    palette: ["#ffffff", "#ff0000", "#00ff00"]
-    breaks: [0.25, 0.75]
-    mask: [0, 1, 1]          # class 0 is the slide, not an annotation
+  # - name: Annotations
+  #   run: 41d5e1d7d43641ea8f645f9b7945e9f7
+  #   path: annot_masks
+  #   classes: 3
+  #   palette: ["#ffffff", "#ff0000", "#00ff00"]
+  #   breaks: [0.25, 0.75]
+  #   mask: [0, 1, 1]          # class 0 is the slide, not an annotation
 
 # Optional. Without `only:`, every file in the background folder is a case --
 # which for 378 slides is a report nobody scrolls through. Names are stems
