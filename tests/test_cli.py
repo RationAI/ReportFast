@@ -345,6 +345,47 @@ def test_being_offline_is_not_reported_as_a_broken_report():
 # ── publishing: asked for, out loud ─────────────────────────────────────────
 
 
+def test_no_workflow_publishes():
+    """Publishing is never a side effect, and CI is where an implied one would
+    arrive: someone adds `&& reportfast build --publish` to a green pipeline and
+    every push starts uploading reports.
+
+    So the rule is checked against the workflows themselves rather than left to
+    review. A commented line is allowed -- this repository documents the rule in
+    its workflow header precisely so it is not rediscovered -- but no executed step
+    may name the flag, and none may carry tracking credentials.
+    """
+    root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    if not root.is_dir():
+        return  # no CI yet; the rule is that the day there is, it does not publish
+    for path in sorted(root.glob("*.yml")) + sorted(root.glob("*.yaml")):
+        # Parsed, not grepped. A workflow with a syntax error never runs at all, so
+        # a guard that only reads lines can wave through a file whose steps it is
+        # failing to read -- which is the exact way this rule comes back.
+        #
+        # Imported here rather than at the top of the file: YAML is an optional
+        # extra, and a test about CI should not be the thing that makes the suite
+        # unrunnable without it.
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - only without the manifest extra
+            return
+
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as error:
+            raise AssertionError(f"{path.name} is not valid YAML: {error}") from error
+        executed = [
+            step.get("run", "")
+            for job in (loaded.get("jobs") or {}).values()
+            for step in (job.get("steps") or [])
+        ]
+        assert executed, f"{path.name} runs nothing; a green check that runs nothing is worse than none"
+        for line in executed:
+            assert "--publish" not in line, f"{path.name} would publish: {line.strip()}"
+            assert "MLFLOW_TRACKING" not in line, f"{path.name} holds credentials: {line}"
+
+
 def test_publish_without_a_target_refuses_before_uploading():
     root = workspace()
     code, _, err = run("build", str(root / "r.yaml"), "--no-check", "--publish")

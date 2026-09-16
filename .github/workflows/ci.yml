@@ -1,0 +1,53 @@
+# Test and lint only. There is deliberately no publish step here, and one must
+# never be added: `reportfast build --publish` is the only path that uploads, it
+# is never implied by a manifest key, a CI job, or a prompt, and this workflow has
+# no credentials with which to upload even if someone typed the flag. The rule is
+# asserted by `test_no_workflow_publishes` rather than trusted to review.
+#
+# The `dev` group is what a contributor runs, and it declares the package with
+# both extras -- so this installs the YAML and MLflow paths rather than skipping
+# them. Both are optional in the package precisely so that `import report_fast`
+# works without them, which means a base-install run here would quietly test a
+# subset and report it as green.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor is a promise `requires-python` makes to users, so it is the
+        # version most worth testing: a run on 3.12 alone cannot tell you that
+        # 3.10 broke.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the dev group (package, both extras, pytest, ruff)
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Test
+        # No `XOPAT_VIEWER` is set, so the two checks that compare the derived
+        # contract against a viewer checkout skip rather than fail -- they need a
+        # second private repository, and `test_contract.py` skips rather than
+        # quietly asserting nothing. Everything else runs, including the docstring
+        # examples and the tests that keep the prose in step with the code.
+        run: uv run pytest -q
