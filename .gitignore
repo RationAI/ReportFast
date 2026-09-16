@@ -12,6 +12,11 @@ dist/
 # (DESIGN.md: same input, byte-identical HTML — regenerable freely.)
 reports/*.html
 *.provenance.json
+# `DEFAULT_OUT` is `report.html` in the working directory, so a build with no -o
+# from the repo root lands here. Its sidecar was already ignored by the rule above
+# and this file was not, which left a build output looking like untracked source.
+# Root-only on purpose: `/` keeps a checked-in HTML somewhere else from vanishing.
+/report.html
 
 # Local MLflow tracking stores from ad-hoc publishes (`file:mlruns` experiments)
 mlruns/
