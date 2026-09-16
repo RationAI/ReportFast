@@ -567,6 +567,41 @@ def test_an_empty_or_absent_directory_is_said_as_an_absent_directory():
         assert "not a directory" in str(error) and "Nothing was read" in str(error)
 
 
+def test_the_door_does_not_read_back_its_own_provenance_sidecars():
+    """A build whose `-o` lands in the folder being reported on must not poison
+    the next build.
+
+    `report.html` + `report.provenance.json` beside the session JSON is a natural
+    thing to produce, the sidecar matches `*.json`, and the gate's verdict on a
+    sidecar is a wall of text about `kind`/`tool`/`data_ids` not being viewer keys
+    -- technically true, useless as advice, and it stops a report that was fine a
+    minute ago. Reproduced before it was fixed: build once, rerun the same command
+    unchanged, exit 1.
+    """
+    good = load_session(json.dumps(design()), endpoint=ENDPOINT)
+    with temp_dir_sessions([good]) as root:
+        (root / "report.provenance.json").write_text(
+            json.dumps({"kind": "report", "tool": {"name": "report-fast"}, "data_ids": []}),
+            encoding="utf-8",
+        )
+        loaded = sessions_from_dir(root, endpoint=ENDPOINT)
+        assert len(loaded) == 1, "a sidecar is not a case"
+
+
+def test_a_folder_of_only_sidecars_says_which_mistake_it_is():
+    """The generic "no session files" message would send a reader to check files
+    that are fine; the fix here is obvious the moment the sidecars are named."""
+    with temp_dir_sessions([]) as root:
+        (root / "report.provenance.json").write_text('{"kind": "report"}', encoding="utf-8")
+        try:
+            sessions_from_dir(root, endpoint=ENDPOINT)
+        except ComposeError as error:
+            assert "only provenance sidecars" in str(error), error
+            assert "report.provenance.json" in str(error), error
+        else:
+            raise AssertionError("a folder of sidecars is not a folder of sessions")
+
+
 def test_the_temp_dir_is_gone_afterwards_because_the_door_persists_nothing():
     sessions = [load_session(json.dumps(design()), endpoint=ENDPOINT)]
     with temp_dir_sessions(sessions) as root:

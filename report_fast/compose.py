@@ -907,8 +907,32 @@ def sessions_from_dir(
             f"--sessions-dir {root} is not a directory. Nothing was read, so "
             "nothing is wrong with the sessions inside it."
         )
-    files = sorted(item for item in root.glob(pattern) if item.is_file())
+    # Our own sidecars are not sessions. `-o` inside the folder being reported on
+    # is a natural thing to type, and the sidecar it drops there is a `*.json` the
+    # glob below would otherwise collect -- so the first build would poison the
+    # second one's input, and the gate's complaint would be about `kind`, `tool`
+    # and `data_ids` not being viewer keys. True, useless, and self-inflicted:
+    # this tool's output is not this tool's input, which is the same rule that
+    # keeps `reports/*.html` out of the source tree.
+    from .provenance import SUFFIX
+
+    files = sorted(
+        item
+        for item in root.glob(pattern)
+        if item.is_file() and not item.name.endswith(SUFFIX)
+    )
     if not files:
+        # A folder of nothing but sidecars says so, because that is the one shape
+        # of this mistake where the fix is obvious once it is named -- and the
+        # generic message would have the reader checking files that are fine.
+        only = [item.name for item in root.glob(pattern) if item.name.endswith(SUFFIX)]
+        if only:
+            raise ComposeNotFound(
+                f"--sessions-dir {root} holds only provenance sidecars "
+                f"({', '.join(only[:3])}{'...' if len(only) > 3 else ''}), which "
+                "describe reports rather than being sessions. Point it at the "
+                "folder of session JSON, or write the report somewhere else with -o."
+            )
         # Not-found rather than wrong: an empty folder is nothing to work on
         # (exit 4), not a spec that needs editing (exit 1).
         raise ComposeNotFound(
