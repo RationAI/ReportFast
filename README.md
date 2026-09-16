@@ -41,6 +41,43 @@ table below.
 | `reportfast skill show --reference examples/dysplasia_case.json` | yes — the example sessions ship too |
 | `uv run python scripts/derive_schema.py` | **no**: re-deriving the contract is a repo step, needs a checkout |
 
+### Check the install in thirty seconds
+
+Four commands, each answering a different question, and none of them needing your
+data. Run them from a project that has the package, in this order — a failure at
+step *n* means step *n* is broken and the ones after it say nothing.
+
+`reportfast` below is the console script the package installs into the
+environment's `bin`. If it is not on your PATH — which is the normal state of a `uv`
+project — prefix each line with `uv run`, or activate the venv first. Every command
+in this README is written the short way for that reason, and every one of them takes
+the prefix.
+
+```bash
+reportfast --version        # is the package importable at all, and which viewer was it verified against
+reportfast skill where      # does an agent on this machine find the procedure
+reportfast skill show --reference examples/dysplasia_case.json > /tmp/s.json
+reportfast plan --session /tmp/s.json     # do the gates work, on a session that ships
+reportfast find <a run id>  # only if you use MLflow: is the tracking API reachable from here
+```
+
+`--version` prints `report-fast 0.1.0 (viewer 3.1.0 @ 18c94f2b)`. The second half is
+the point: every validation rule was parsed out of that viewer commit, so a report
+this tool says is good is good *for that viewer build*. Anything else on that line —
+`(viewer ? @ )`, or `contract unreadable: …` — means the install has no schema
+artifacts, which makes every gate in the package unable to answer. Treat it as a
+broken wheel, not a warning to ignore.
+
+`plan --session` with the shipped example exits 0 and prints the session's own
+counts. It reaches no server, so it separates "the library is broken here" from "my
+data is unreachable from here" — which is otherwise the single most confusing
+failure in this tool, because a report of unreachable data builds successfully and
+opens as black cards.
+
+If `skill where` says not installed, run `reportfast skill install`. Nothing else
+in this README will behave differently; that command only affects what an agent
+follows.
+
 Two ways to use it, and the first is the default:
 
 **Ask.** You (or an agent) author one xOpat session document, the library validates
@@ -164,6 +201,122 @@ without editing it. `build` takes `-o/--out`, `--no-check`, `--check-only`
 and on the authored door `--layout grid|rows` / `--no-grid`. A block's name is the
 component's own (`SlideGrid`), not the manifest's snake_case (`slide_grid`), and the
 error says so rather than telling you to invent a component.
+
+## Every option in one place
+
+The sections above say *why* each thing exists. This one is the list, for when you
+are at a terminal and only want to know whether a flag exists and what it defaults
+to. `reportfast <command> --help` is always the version that matches what you
+installed, and says more; nothing here overrides it.
+
+### Global
+
+| | |
+| --- | --- |
+| `--version` | tool version and the viewer commit the validation rules came from |
+
+### How sessions arrive — `plan` and `build`
+
+| | |
+| --- | --- |
+| `manifest` | the one positional argument: a YAML report spec. Omit it and use `--sessions-dir` |
+| `--sessions-dir DIR` | a folder of authored session JSON, one file per case; sorted, so the order is the filename's |
+| `--session PATH_OR_JSON` | one session, as a file or inline JSON. Repeatable, order preserved. **Not a URL** — a pasted viewer link goes through `XopatSession.from_url()` in Python, or a manifest's `from_url:` |
+| `--design PATH_OR_JSON` | on `plan`: gate one design and print its slots. On `build`: name the design for the sidecar. **Neither binds anything** |
+| `--slot INDEX=NAME` | name a `data[]` index the design fills per case, e.g. `0=slide`. Repeatable; default `0=slide`. `--design` prints the rest |
+
+### Where the images are — `plan` and `build`
+
+| | | Default |
+| --- | --- | --- |
+| `--base-url URL` | viewer root the fragment is appended to | `$XOPAT_BASE_URL` |
+| `--wsi-base-url URL` | tile server root — its own mount, not under `--base-url` | `$XOPAT_WSI_BASE_URL` |
+| `--image-protocol NAME` | registered `slide_protocols` entry for the backgrounds (`.czi` and friends) | *unset* |
+| `--mount-root PREFIX` | prefix stripped from paths to form a DataID; `''` strips nothing | `/mnt` |
+| `--tracking-uri URL` | MLflow API root, when there is no `flow:` and the env is unset | mlflow's own |
+
+These beat the manifest's `endpoint:` and the environment, which is what lets one
+manifest be aimed at a second deployment without editing it.
+
+### What the page says and where it goes — `plan` and `build`
+
+| | |
+| --- | --- |
+| `--title TITLE` | page title, for a report built from `--sessions-dir`; a manifest carries its own |
+| `--subtitle SUBTITLE` | one line under the title, same condition |
+
+### Only `plan`
+
+| | |
+| --- | --- |
+| `--json` | machine-readable cases, coverage, sources and warnings — for a script that checks a report rather than a person reading one. The text plan says the same things; this is the same data without prose around it |
+
+### Only `build`
+
+| | |
+| --- | --- |
+| `-o, --out OUT` | where to write; defaults to the manifest's `out:`, else beside it. With `--publish` on a manifest-less build, nothing local is written unless you give this |
+| `--no-check` | skip the DataID probe — offline, or a report that will not be opened |
+| `--check-only` | build in memory and probe; write neither HTML nor sidecar |
+| `--publish` | upload the report and its provenance (plus manifest and plan, when there is a manifest). **The only write this tool performs** |
+| `--run RUN_ID` | publish into this run instead of the manifest's `publish:`; required on the manifest-less door |
+| `--layout grid\|rows` | card layout; default `grid` |
+| `--no-grid` | the same as `--layout rows` |
+| `--emit-manifest` | print a manifest that would reproduce this report; writes nothing |
+
+### Only `find`
+
+| | |
+| --- | --- |
+| `RUN_ID` | a run id you already have — nothing here searches MLflow |
+| `--path PATH` | artifact subdirectory to list; default the root |
+| `-r, --recursive` | descend into subdirectories |
+| `--slides` | only files with a slide suffix |
+| `--data-ids` | one DataID per line, nothing else, for piping |
+
+### Only `skill`
+
+| | |
+| --- | --- |
+| `show` | print `SKILL.md` |
+| `show --reference NAME` | print one bundled file instead — `references/xopat-v3.md`, `examples/dysplasia_case.json` |
+| `install` | place the skill in `~/.claude/skills` |
+| `install --project` | `./.claude/skills` instead, this repository only |
+| `install --dest DIR` | somewhere else entirely |
+| `install --force` | replace a skill that is already there — check first whether anyone edited it |
+| `install --link` | symlink, so a checkout edit is live at once |
+| `where` | say where the skill is and whether an agent would find it |
+
+### Manifest keys
+
+Every key is checked strictly: one the library does not know stops the build and
+names the nearest candidate. A key that silently did nothing is the failure this
+exists to prevent — `min_layer:` instead of `min_layers:` reads as a report that
+was filtered. [manifests/example.yaml](manifests/example.yaml) is the four-key
+starting file; [skills/reportfast/manifest.example.yaml](skills/reportfast/manifest.example.yaml)
+lists the rest.
+
+| | |
+| --- | --- |
+| `title`, `subtitle`, `intro` | the page's own words |
+| `out` | where the HTML goes, relative to the manifest |
+| `theme`, `grid` | page appearance |
+| `background` | the slides: exactly one of `drive:`/`dir:`, `run:` + `path:`, or `python:` — plus `patterns:` and `recursive:` |
+| `masks` | one row per overlay: the same source keys, then `name`, `color`, `opacity`, `visible`, `classes`, `palette`, `breaks`, `mask`, and `params:` which reaches the v3 layer verbatim |
+| `only` | the cases, in report order, as filename stems |
+| `min_layers` | drop a case with fewer overlays than this; the plan lists what dropped |
+| `sessions` | whole sessions pasted in: `from_config:`, `from_file:`, `from_url:` |
+| `sessions_from` | `module:function` — your own code returning the sessions. The door for cases the library cannot list |
+| `params`, `preset` | session defaults for every case |
+| `metrics`, `charts`, `blocks` | the components around the cards — `prose`, `heading`, `bullets`, `links`, `metrics`, `chart`, `section`, `raw_html` |
+| `endpoint` | `base_url`, `wsi_base_url`, `image_protocol`, `mount_root` |
+| `flow` | `tracking_uri`, `web_url`, `artifact_prefix` |
+| `publish` | where `--publish` would log. **Setting it uploads nothing** |
+
+Precedence, lowest to highest: **builtin defaults → `preset` /
+`$XOPAT_SESSION_CONFIG` → a pasted config → manifest keys → flags**. A preset can
+never carry `data`, `background` or `visualizations` — those are per-slide content
+a default would silently rewire into the wrong indices.
 
 ## Four ways in
 
@@ -447,6 +600,13 @@ uploads nothing unless you pass `--publish <run_id>`.
 **The base path selects the viewer version.** This host serves v2 at `/xopat/`
 and v3 at `/v3/`; a v3 session opened by v2 *looks* like it loaded, so a wrong
 mount fails quietly rather than 404ing.
+
+**Which is why a 404 is a different problem.** A wrong mount shows a viewer that
+loaded and an empty canvas; a server's own 404 page means the path never reached
+the viewer at all — the mount is missing or the deployment is down. Those two read
+alike in a bug report and have opposite fixes, so say which one you saw. And a URL
+fragment is never sent to a server: the `#…` half of a card link cannot be what a
+server rejected, however much it looks like the thing that differs.
 
 Pass coordinates per call instead with `XopatEndpoint(base_url=…, wsi_base_url=…,
 image_protocol=…, mount_root=…)`.

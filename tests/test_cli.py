@@ -1201,6 +1201,143 @@ def test_a_malformed_slot_is_explained_as_a_slot():
         assert "INDEX=NAME" in err or "must be" in err, (bad, err)
 
 
+def _parser_flags(*, with_help: bool = False) -> set:
+    """Every long flag the parser accepts, at any depth.
+
+    `--help` is left out by default: the check that uses this asks "is every flag
+    documented", and forcing a README to list `-h/--help` on four subcommands
+    would be a rule about table-filling. Pass `with_help=True` for the reverse
+    question, where its absence would report a real flag as invented.
+    """
+    import argparse
+
+    from report_fast.__main__ import _parser
+
+    found = set()
+
+    def walk(sub):
+        for action in sub._actions:
+            for option in action.option_strings:
+                if option.startswith("--") and (with_help or option != "--help"):
+                    found.add(option)
+            if isinstance(action, argparse._SubParsersAction):
+                for child in action.choices.values():
+                    walk(child)
+
+    walk(_parser())
+    return found
+
+
+def _readme_reference() -> str:
+    """The README's option-reference section, or '' when there is no such section."""
+    text = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    start = text.find("## Every option in one place")
+    if start < 0:
+        return ""
+    end = text.find("\n## ", start + 5)
+    return text[start:] if end < 0 else text[start:end]
+
+
+def test_every_flag_the_cli_accepts_is_in_the_readme():
+    """The reference section and the parser are one list written twice.
+
+    A flag that exists but is documented nowhere is a flag nobody uses, and the
+    section's whole promise is that you do not have to open `--help` for all four
+    commands to know whether something exists. `--json` was missing from it for
+    exactly one commit -- noticed while writing the test that now notices it.
+    """
+    reference = _readme_reference()
+    assert reference, "README.md has no option reference section to check"
+    missing = sorted(flag for flag in _parser_flags() if flag not in reference)
+    assert not missing, f"flags the CLI accepts and the README never mentions: {missing}"
+
+
+def test_each_readme_option_sits_under_a_command_that_has_it():
+    """A flag listed under the wrong command is a documented lie.
+
+    The reference section groups by heading, and a heading that says "`plan` and
+    `build`" claims both accept everything below it. `--json` -- plan-only -- sat
+    in an endpoint section for one commit, and the only thing wrong with it was
+    that someone would type `reportfast build --json`, get exit 4, and conclude
+    the README is not worth trusting. So the rule is *every* command named in the
+    heading must accept the flag, not *some*.
+
+    Sub-subcommands count as their parent's: `--force` belongs to `skill install`
+    and is listed under `Only skill`, which is how anyone finds it.
+    """
+    import argparse
+
+    from report_fast.__main__ import _parser
+
+    reference = _readme_reference()
+    assert reference, "README.md has no option reference section to check"
+    parser = _parser()
+    commands = {
+        name: child
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+        for name, child in action.choices.items()
+    }
+
+    def accepting(sub) -> set:
+        """Flags of `sub` and everything below it."""
+        found = {
+            option
+            for action in sub._actions
+            for option in action.option_strings
+            if option.startswith("--")
+        }
+        for action in sub._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for child in action.choices.values():
+                    found |= accepting(child)
+        return found
+
+    misplaced = []
+    for part in re.split(r"\n### ", reference):
+        heading = part.splitlines()[0]
+        named = [name for name in commands if f"`{name}`" in heading]
+        if not named:
+            continue  # `Global`, `Manifest keys`: no command claim to check
+        for span in re.findall(r"`([^`]*)`", part):
+            for word in span.split():
+                match = re.match(r"--([a-z][a-z0-9-]*)", word)
+                if not match or match.group(0) == "--help":
+                    continue
+                flag = match.group(0)
+                missing = [n for n in named if flag not in accepting(commands[n])]
+                if missing:
+                    misplaced.append(f"{flag} (under \"{heading}\", not on {'/'.join(missing)})")
+    assert not misplaced, f"README lists flags under commands that reject them: {sorted(set(misplaced))}"
+
+
+def test_the_readme_names_no_flag_the_cli_lacks():
+    """The other direction, which is the one that misleads a reader.
+
+    A documented flag that does not exist is worse than an undocumented one: the
+    reader types it, argparse answers `unrecognized arguments`, and the next thing
+    they try is the flag two lines below it. Restricted to the reference section
+    rather than the whole README, because the rest of the file legitimately names
+    `uv`'s own flags (`--extra`, `--editable`) and `pytest.skip`-style prose.
+    """
+    reference = _readme_reference()
+    assert reference, "README.md has no option reference section to check"
+    real = _parser_flags(with_help=True)
+    # Only long options inside code spans count. Matching bare backtick words
+    # instead sweeps up the manifest keys in the same section -- `background:`,
+    # `min_layers`, `plan` -- and reports them as invented flags, which is a
+    # failure that describes the test rather than the README.
+    named = set()
+    for span in re.findall(r"`([^`]*)`", reference):
+        # Split on whitespace first so a cell like `--layout grid|rows` does not
+        # yield a flag spelled `--layout-grid|rows`: the metavar is not the option.
+        for word in span.split():
+            if word.startswith("--") and len(word) > 2:
+                named.add(re.match(r"--([a-z][a-z0-9-]*)", word).group(0))
+    invented = sorted(flag for flag in named if flag not in real)
+    assert not invented, f"README documents flags the CLI does not have: {invented}"
+
+
 if __name__ == "__main__":
     failures = []
     for name, function in sorted(globals().items()):
