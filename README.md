@@ -103,6 +103,7 @@ reportfast plan  reports/foo.yaml              # resolve and report; writes noth
 reportfast build reports/foo.yaml              # write the HTML, then probe every DataID
 reportfast build reports/foo.yaml --publish    # the only write to MLflow
 reportfast find  <run-id> --path tile_masks    # list what a run's artifacts hold
+reportfast --version                           # tool version + the viewer it was verified against
 
 # the same three gates, from authored sessions instead of a YAML file:
 reportfast plan  --design $D/design.json --slot 0=slide --slot 1=mask
@@ -536,9 +537,18 @@ uv run python tests/test_audit.py         # the gate: findings, paths, the sever
 uv run python tests/test_frozen.py        # the ten components, and what they refuse
 uv run python tests/test_compose.py       # the in-memory composition and the door
 uv run python tests/test_provenance.py    # the sidecar, and that the page is untouched
+uv run python tests/test_skill.py         # the shipped skill: where it goes, what it claims
+uv run python tests/test_examples.py      # the package docstring's examples, executed
 uv run pytest tests
-uv run ruff check --select F,E9,B .
+uv run ruff check .
 ```
+
+`.github/workflows/ci.yml` runs the suite and the lint on the Python floor (3.10)
+and on 3.12, installed with both extras so the YAML and MLflow paths are exercised
+rather than skipped. It has no publish step and must not gain one — publishing is
+never implied, and `test_no_workflow_publishes` fails the build if a workflow ever
+grows a `--publish` or a tracking credential. The two checks that compare the
+derived contract against a viewer checkout skip when `$XOPAT_VIEWER` is absent.
 
 Every file is also a script — `python tests/test_cli.py` runs it with no pytest
 installed. None of them reach a server: the run side is driven through a double
