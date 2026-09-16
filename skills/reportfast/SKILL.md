@@ -188,6 +188,13 @@ door it needs `--run RUN`, and the CLI prints `publish -> run <id>` before uploa
 that line is what the run's record needs. A publish uploads the page plus
 `provenance.json`; with no manifest, that record *is* the configuration the run keeps.
 
+**A published build with no `-o` writes no local file.** `--run` named the
+destination; guessing a second one beside whatever directory you happened to stand in
+is not the tool's call, and it used to happen — which is how a repo root accumulated
+a `report.html` nobody asked for. So after a publish without `-o`: there is no file
+to open, no sidecar beside it, and the build says `wrote the run only`. If the user
+wants the local copy as well, add `-o FILE` — that asks for both, not instead.
+
 ## Reading a build that is not what you wanted
 
 | It says | It means |

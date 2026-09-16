@@ -306,6 +306,42 @@ def test_the_skill_names_examples_by_a_reference_the_code_answers():
     assert skill_module.reference("examples/dysplasia_case.json").startswith("{")
 
 
+def test_the_skill_tells_the_truth_about_a_published_build_with_no_out():
+    """The paragraph this guards is the one an agent reads at the moment it is
+    about to look for a file that was never written.
+
+    Publishing with no `-o` writes nothing locally -- ruled after the leak, and
+    enforced in `_door_out`. The skill said nothing about it, so an agent that
+    published and then went looking for `report.html` concluded the build had
+    failed. Prose about a behaviour the CLI already implements needs a seam test,
+    or it drifts the next time the behaviour moves.
+    """
+    text = skill_module.skill_text()
+    publish = text.split("**`--publish` is asked for")[1].split("## ")[0]
+    assert "no `-o`" in publish, "the publish paragraph lost the -o rule"
+    assert "the run only" in publish, "quote the line the agent will actually see"
+    assert "-o FILE" in publish, "say how to ask for the local copy as well"
+
+
+def test_the_skill_teaches_design_recording_on_the_build():
+    """`build --design` belongs in the design flow: an agent holding the design and
+    the temp folder is exactly the caller who can record it, and the default --
+    `design: null` -- loses the one document that makes the report rebuildable once
+    the folder is deleted.
+
+    Scoped to the section that binds a design, not to every `build` line: the
+    quick reference above it covers authored sessions that came from nowhere in
+    particular, and naming a design there would tell an agent to claim one they do
+    not have.
+    """
+    text = skill_module.skill_text()
+    flows = [chunk for chunk in text.split("```bash") if "design.bind(" in chunk]
+    assert flows, "the skill lost the bind-in-Python flow"
+    build = flows[0].split("```")[0]
+    assert "--design" in build, build
+    assert "--slot" in build, "the slots are part of the record, so teach them"
+
+
 if __name__ == "__main__":
     every = [
         (name, made)
