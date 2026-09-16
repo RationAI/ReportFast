@@ -46,11 +46,10 @@ dev = [
 # families -- import ordering and naming are not what a report bug hides behind,
 # and reformatting 30 files to satisfy a linter is not a reviewable change.
 lint.select = ["F", "E9", "B"]
-# DESIGN.md: `_legacy/` is the state/server/resolver layer "deleted in spirit, kept
-# on disk". Dead code is not held to the live ruleset and not edited to satisfy a
-# linter; it is either restored (and then fixed) or deleted deliberately. Deleting
-# it is a decision for a human, so it stays excluded until someone makes it.
-extend-exclude = ["_legacy"]
+# No exclude list. The one entry here was `_legacy/`, the state/server/resolver layer
+# DESIGN.md called "deleted in spirit, kept on disk"; the directory is gone now, and an
+# exclusion naming something that does not exist is the kind of line a reader stops
+# trusting. If dead code ever returns it gets deleted or fixed, not excluded.
 
 [tool.pytest.ini_options]
 # scripts/ holds runnable demos named test_*.py; collection would import them.

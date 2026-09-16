@@ -617,9 +617,11 @@ All four phases are in place. What shipped beyond the list: `build.py`
 (`build_report`, `sessions_for`) for the paths-in-report-out path,
 `as_session()` as the single coercion door every component goes through,
 `Section`, the CLI with its three gates and exit codes, and the skill bundle.
-The state/server/resolver layer and the components that needed it are in
-`_legacy/` — deleted in spirit, kept on disk only because this directory is
-not a git repository.
+The state/server/resolver layer and the components that needed it were held in
+`_legacy/` — "deleted in spirit, kept on disk only because this directory is not a
+git repository." It is a git repository now, so the directory has been deleted
+properly; the layer is gone, not parked. Anything that needed a live server or a
+resolver state has no home here, and the read-only model is the whole design.
 
 ### Build order, round 2 (the review refinements)
 
@@ -637,7 +639,7 @@ plus CLI tests for the door.
 0. **`git init`** — the repo is not one, and decisions 8/10 and the skill's
    whole "committed manifest" story assume it. Plus `.gitignore`
    (`.venv/`, `__pycache__`, `reports/*.html`, `*.provenance.json`). Prerequisite,
-   not a feature; the `_legacy/` directory can finally be deleted properly.
+   not a feature; it is what let `_legacy/` be deleted properly instead of parked.
 1. **`scripts/derive_schema.py`** — Python-parse the pinned viewer source (no
    node on this pod, so `ts-json-schema-generator` is out; the session-document
    types are `src/types/app.d.ts` + `XOpatSetup` in `config.d.ts` — *not*
