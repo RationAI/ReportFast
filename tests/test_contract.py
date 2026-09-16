@@ -27,10 +27,12 @@ import json
 import os
 import subprocess
 import sys
+import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import _support  # noqa: E402
 from report_fast import contract  # noqa: E402
 from report_fast.contract import ContractError  # noqa: E402
 
@@ -185,9 +187,8 @@ def test_every_registered_layer_type_documents_itself():
     for shader_type in sorted(contract.shader_types()):
         document = contract.layer_documentation(shader_type)
         assert "fields" in document, f"{shader_type} has no field list"
-    import pytest
 
-    with pytest.raises(ContractError):
+    with _support.raises(ContractError):
         contract.layer_documentation("classify")  # retired in v3
 
 
@@ -201,13 +202,18 @@ def test_the_committed_contract_still_matches_the_pinned_viewer():
     a *different* commit would fail for a reason that is not a bug -- so the test
     skips rather than lies. What it catches when it runs: the viewer moved under
     the artifacts, or somebody edited `shader.py`'s tables away from the viewer.
-    """
-    import pytest
 
+    `unittest.SkipTest`, not `pytest.skip`: this file is runnable standalone, and
+    pytest's `Skipped` subclasses BaseException, so it walked straight past the old
+    two-line runner and out of the process. The README tells people to run this
+    file by hand, and on any machine without a viewer checkout at $XOPAT_VIEWER --
+    that is, on every machine but this one -- the documented command ended in a
+    traceback.
+    """
     if not DERIVE.is_file():
-        pytest.skip("derive_schema.py is not installed")
+        raise unittest.SkipTest("derive_schema.py is not installed")
     if not VIEWER.is_dir():
-        pytest.skip(f"no xOpat checkout at {VIEWER}; set $XOPAT_VIEWER")
+        raise unittest.SkipTest(f"no xOpat checkout at {VIEWER}; set $XOPAT_VIEWER")
     result = subprocess.run(
         [sys.executable, str(DERIVE), "--check", "--viewer", str(VIEWER)],
         capture_output=True,
@@ -333,7 +339,4 @@ def test_the_skill_still_carries_the_rules_that_cost_someone_a_report():
 
 
 if __name__ == "__main__":
-    for name, function in sorted(globals().items()):
-        if name.startswith("test_") and callable(function):
-            function()
-            print(f"ok  {name}")
+    raise SystemExit(_support.run(globals(), origin="test_contract.py"))
