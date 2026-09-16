@@ -21,8 +21,7 @@ its own and be correct; it would just be correct by an argument nobody re-checks
 
 from __future__ import annotations
 
-import sys
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 
 class _Raises:
@@ -78,8 +77,8 @@ def run(namespace: Dict[str, Any], *, origin: str = "") -> int:
     ignore red lines -- and the checks worth reading are the ones that stayed red
     for a reason.
 
-    `origin` names the file in the summary line; it comes from `__name__` at the
-    call site so the runner does not have to guess how it was invoked.
+    `origin` names the file in the summary line, so output from fifteen of these
+    running in a row says which one a failure came from.
     """
     every = [
         (name, made)
@@ -107,8 +106,3 @@ def run(namespace: Dict[str, Any], *, origin: str = "") -> int:
     where = f" in {origin}" if origin else ""
     print(f"\n{ran - failed}/{ran} passed{tail}{where}")
     return 1 if failed else 0
-
-
-def main(namespace: Dict[str, Any]) -> None:
-    """The one line a module's `__main__` needs: `sys.exit(_support.main(globals()))`."""
-    sys.exit(run(namespace, origin=namespace.get("__file__", "")))
