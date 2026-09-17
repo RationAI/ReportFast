@@ -12,7 +12,9 @@ page, and defaults for people who just have paths.
 
 ## Install it in a project
 
-Not on PyPI. Two ways in, from a checkout of this repo or from git:
+Not on PyPI. Two ways in, from a checkout of this repo or from git. Both are
+exercised; the `git+` line below is what a colleague on a fresh machine types, and it
+is tested against the pushed remote:
 
 ```bash
 uv add --editable /path/to/reporting       # a local checkout you are also editing
@@ -30,9 +32,12 @@ explicit command places it: in `~/.claude/skills` by default, or `--project` for
 `./.claude/skills` alone. `skill show` prints it without installing anything, and
 `skill where` answers why an agent did not use it.
 
-The `git+` form has not been tried from this machine (no push credentials, and the
-host is unreachable for git here); the local path form is what is exercised in the
-table below.
+A `git+` install needs no credentials and no checkout, and it carries the skill and
+the example sessions: `skill where` finds the bundled copy inside
+`site-packages/report_fast/skill`, and `--version` prints the same viewer pin as a
+wheel build. What it cannot do is place the skill where an agent reads it — that is
+what `skill install` above is for, and it is a step on every install path, not only
+the git one.
 
 | From a project that has it installed | Works |
 | --- | --- |
@@ -73,6 +78,27 @@ counts. It reaches no server, so it separates "the library is broken here" from 
 data is unreachable from here" — which is otherwise the single most confusing
 failure in this tool, because a report of unreachable data builds successfully and
 opens as black cards.
+
+### When the probe says "unreachable from here"
+
+`probe 0/N DataIDs open; 0 refused, N unreachable from here` is exit 0 and means the
+machine building the report could not ask the tile server. That is a fact about
+where you are standing, not about the report — and the two ways to be wrong about
+it are both common:
+
+- **`0 refused` is the tell.** A refused DataID is the server answering *no*;
+  unreachable is it never answering. Refused means fix a `mount_root`, a protocol,
+  or a run. Unreachable means the request never left, or died on the way.
+- **A proxy is usually the reason, in both directions.** From a pod or a CI runner
+  behind an HTTP proxy, requests to a cluster hostname can be sent *through* the
+  proxy and time out; the same host is reachable directly. Conversely, a hostname
+  only reachable via the proxy fails when you bypass it. `NO_PROXY`/`HTTPS_PROXY` is
+  one environment variable to get wrong and it produces identical-looking timeouts,
+  so confirm with one direct request before believing anything about the report.
+
+Then say which of the two you have. "Built, links unverified from here" is a
+complete and honest sentence about a report; "it works" is not, and a colleague who
+opens it and finds black cards has to rediscover the difference alone.
 
 If `skill where` says not installed, run `reportfast skill install`. Nothing else
 in this README will behave differently; that command only affects what an agent
