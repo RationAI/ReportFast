@@ -1,126 +1,240 @@
 # ReportFast
 
-Static HTML reports for whole slide images. A report is a file of cards and
-tables; every card links into the [xOpat](https://xopat.rationai.cloud.trusted.e-infra.cz/v3/)
-v3 viewer with the session carried in the URL fragment. Nothing is served, no
-JavaScript runs in the report, and the file can be mailed.
+A report is a static HTML file of cards and tables, and every card links into the
+[xOpat](https://xopat.rationai.cloud.trusted.e-infra.cz/v3/) v3 viewer with the
+whole session carried in the URL fragment. Nothing is served, no JavaScript runs in
+the page, and you can mail the file.
 
-Everything is built on one object. `XopatSession` holds the session document the
-viewer boots from — the same JSON your colleague pastes into chat — and turns it
-into a link. The rest of the tool is optional: components that put sessions on a
-page, and defaults for people who just have paths.
+Everything rests on one object. `XopatSession` holds the session document the viewer
+boots from — the same JSON your colleague pastes into chat — and turns it into a
+link. On top of it: a gate that refuses a session the viewer would not load, a probe
+that asks the tile server whether every image the page references actually opens,
+ten components that put sessions on a page, and a CLI that runs all of it in the
+right order.
+
+The problem it exists to kill is the invisible one. You build a report, the links
+point at data the tile server cannot open, the viewer loads happily, the cards are
+black, and **nothing anywhere reports an error**. That failure cost this tool its
+probe: `build` asks the image server about every DataID before it lets you call the
+report done.
+
+**What it is not.** No web server, no database, no metric store, no slide reader.
+It never uploads anything unless you type `--publish`. And it does not invent
+sessions — you or an agent author them, and the library checks them.
 
 ## Install it in a project
 
-Not on PyPI. Two ways in, from a checkout of this repo or from git. Both are
-exercised; the `git+` line below is what a colleague on a fresh machine types, and it
-is tested against the pushed remote:
+Not on PyPI. Two ways in, and both are exercised — the `git+` line is what someone
+on a fresh machine types, tested against the pushed remote:
 
 ```bash
-uv add --editable /path/to/reporting       # a local checkout you are also editing
-uv add "report-fast @ git+https://github.com/RationAI/reporting.git"   # or over git
-uv add 'report-fast[all] @ …'              # same, with the YAML and MLflow extras
+uv add "report-fast @ git+https://github.com/RationAI/reporting.git"       # over git
+uv add "report-fast[all] @ git+https://github.com/RationAI/reporting.git"  # + YAML and MLflow
+uv add --editable /path/to/reporting      # or a local checkout you are editing
 
-uv run reportfast skill install
+uv run reportfast skill install           # do not skip this one
 ```
 
-That second command is the one that is easy to miss. Installing puts the library in
-the project's venv; it cannot put the **skill** — the procedure an agent follows —
-anywhere an agent looks, because installing is not allowed to write outside the
-environment it installs into. So the skill travels inside the package and one
-explicit command places it: in `~/.claude/skills` by default, or `--project` for
-`./.claude/skills` alone. `skill show` prints it without installing anything, and
-`skill where` answers why an agent did not use it.
+That last command is the one that is easy to miss, and the one that decides whether
+an agent can use any of this. Installing puts the library in your venv; it cannot
+put the **skill** — the procedure an agent follows — anywhere an agent looks,
+because installing may not write outside the environment it installs into. So the
+skill travels inside the package and one explicit command places it:
+`~/.claude/skills` by default, or `--project` for `./.claude/skills` alone. Without
+it the library works perfectly and the agent never learns the procedure.
+`skill show` prints it without installing anything; `skill where` answers why an
+agent did not use it.
 
-A `git+` install needs no credentials and no checkout, and it carries the skill and
-the example sessions: `skill where` finds the bundled copy inside
-`site-packages/report_fast/skill`, and `--version` prints the same viewer pin as a
-wheel build. What it cannot do is place the skill where an agent reads it — that is
-what `skill install` above is for, and it is a step on every install path, not only
-the git one.
-
-| From a project that has it installed | Works |
-| --- | --- |
-| `uv run reportfast build --sessions-dir DIR -o r.html` | yes |
-| `python -c "import report_fast"` | yes |
-| `reportfast skill show --reference examples/dysplasia_case.json` | yes — the example sessions ship too |
-| `uv run python scripts/derive_schema.py` | **no**: re-deriving the contract is a repo step, needs a checkout |
+Everything below runs the same whether you installed over git, from a checkout, or
+from the wheel.
 
 ### Check the install in thirty seconds
 
-Four commands, each answering a different question, and none of them needing your
-data. Run them from a project that has the package, in this order — a failure at
-step *n* means step *n* is broken and the ones after it say nothing.
+Four commands — five if you use MLflow — each answering a different question, none
+of them needing your data. In this order: a failure at step *n* means step *n* is
+broken, and the ones after it say nothing.
 
-`reportfast` below is the console script the package installs into the
-environment's `bin`. If it is not on your PATH — which is the normal state of a `uv`
-project — prefix each line with `uv run`, or activate the venv first. Every command
-in this README is written the short way for that reason, and every one of them takes
-the prefix.
+The console script lands in the environment's `bin`. If `reportfast` is not on your
+PATH, which is the normal state of a `uv` project, prefix each line below with
+`uv run` or activate the venv first. Everything in this file is written the short
+way, and every command in it takes the prefix.
 
 ```bash
-reportfast --version        # is the package importable at all, and which viewer was it verified against
+reportfast --version        # is the package importable, and which viewer was it verified against
 reportfast skill where      # does an agent on this machine find the procedure
 reportfast skill show --reference examples/dysplasia_case.json > /tmp/s.json
 reportfast plan --session /tmp/s.json     # do the gates work, on a session that ships
-reportfast find <a run id>  # only if you use MLflow: is the tracking API reachable from here
+reportfast find <a run id>  # only if you use MLflow: is the tracking API reachable
 ```
 
-`--version` prints `report-fast 0.1.0 (viewer 3.1.0 @ 18c94f2b)`. The second half is
-the point: every validation rule was parsed out of that viewer commit, so a report
-this tool says is good is good *for that viewer build*. Anything else on that line —
-`(viewer ? @ )`, or `contract unreadable: …` — means the install has no schema
-artifacts, which makes every gate in the package unable to answer. Treat it as a
+`--version` answers:
+
+```
+report-fast 0.1.0 (viewer 3.1.0 @ 18c94f2b)
+```
+
+The second half is the point. Every validation rule was parsed out of that viewer
+commit, so a report this tool calls good is good *for that viewer build*. Anything
+else on that line — `(viewer ? @ )`, or `contract unreadable: …` — means the install
+has no schema artifacts, which leaves every gate unable to answer. Treat that as a
 broken wheel, not a warning to ignore.
 
-`plan --session` with the shipped example exits 0 and prints the session's own
-counts. It reaches no server, so it separates "the library is broken here" from "my
-data is unreachable from here" — which is otherwise the single most confusing
-failure in this tool, because a report of unreachable data builds successfully and
-opens as black cards.
+`plan --session` on the shipped example exits 0 and prints the session's own counts.
+It reaches no server, which is what separates "the library is broken here" from "my
+data is unreachable from here" — otherwise the single most confusing failure in this
+tool, because a report of unreachable data builds successfully and opens as black
+cards.
 
-### When the probe says "unreachable from here"
-
-`probe 0/N DataIDs open; 0 refused, N unreachable from here` is exit 0 and means the
-machine building the report could not ask the tile server. That is a fact about
-where you are standing, not about the report — and the two ways to be wrong about
-it are both common:
-
-- **`0 refused` is the tell.** A refused DataID is the server answering *no*;
-  unreachable is it never answering. Refused means fix a `mount_root`, a protocol,
-  or a run. Unreachable means the request never left, or died on the way.
-- **A proxy is usually the reason, in both directions.** From a pod or a CI runner
-  behind an HTTP proxy, requests to a cluster hostname can be sent *through* the
-  proxy and time out; the same host is reachable directly. Conversely, a hostname
-  only reachable via the proxy fails when you bypass it. `NO_PROXY`/`HTTPS_PROXY` is
-  one environment variable to get wrong and it produces identical-looking timeouts,
-  so confirm with one direct request before believing anything about the report.
-
-Then say which of the two you have. "Built, links unverified from here" is a
-complete and honest sentence about a report; "it works" is not, and a colleague who
-opens it and finds black cards has to rediscover the difference alone.
-
-If `skill where` says not installed, run `reportfast skill install`. Nothing else
-in this README will behave differently; that command only affects what an agent
+If `skill where` answers `installed nothing at …`, run `reportfast skill install`.
+Nothing else here behaves differently; that command only affects what an agent
 follows.
 
-Two ways to use it, and the first is the default:
+## Your first report
 
-**Ask.** You (or an agent) author one xOpat session document, the library validates
-it against the viewer's own schema, a Python loop binds it to your cases, and one
-command turns the result into a page. Nothing is kept except the HTML and a
-provenance sidecar beside it.
+Two commands, and the first writes no report. This is the door for "make me a report
+of these slides": you author the sessions, the library renders the page, and nothing
+is kept except the HTML and a record beside it.
 
 ```bash
-uv sync --extra all
-D=$(mktemp -d); mkdir -p $D/sessions
-$EDITOR $D/design.json                    # one session; see skills/reportfast/SKILL.md
-uv run reportfast plan --design $D/design.json --slot 0=slide --slot 1=mask
+mkdir -p myreport/sessions        # one JSON per case; you write these
+$EDITOR myreport/sessions/case-01.json
+cd myreport
 ```
 
-`plan` prints the slots, what the endpoint resolves to, and the Python that binds
-the design to your case list — which is the step in the middle, and is Python
-because a loop over 300 cases does not fit in a flag:
+A session is the JSON the viewer boots from, so the fastest way to write your first
+is to start from one that exists: `reportfast skill show --reference
+examples/dysplasia_case.json` prints a real one, and
+[skills/reportfast/SKILL.md](skills/reportfast/SKILL.md) explains every field. It is
+called a *session* rather than a slide because one may carry several backgrounds —
+timepoints, stains, channels — that the reader switches between.
+
+Now look before you build:
+
+```bash
+reportfast plan --sessions-dir sessions --title "QC pilot"
+```
+
+```
+QC pilot: 1 cases, up to 1 overlays
+out      None
+publish  not set
+```
+
+`plan` resolves everything a build would do and writes nothing. There is no flag
+that makes it write. Cases per layer, layers per case, files per source, everything
+`min_layers:` dropped, and every warning — all of it before a byte of HTML exists.
+
+```bash
+reportfast build --sessions-dir sessions --title "QC pilot" -o report.html
+```
+
+```
+QC pilot: 1 cases, up to 1 overlays
+out      report.html
+publish  not set
+
+wrote     report.html
+probe     3/3 DataIDs open; 0 refused
+```
+
+That last line is the one to read. The build asked the tile server about all three
+images the page links and got three yeses. `open` and `refused` are the server
+answering; `unreachable from here` means it never got the question, and that is a
+fact about where you are standing rather than about the report — see
+[When the probe says "unreachable"](#when-the-probe-says-unreachable-from-here).
+
+Two files exist now, and nothing else:
+
+```
+report.html                 the report — open it, click a card
+report.provenance.json      what it was built from
+```
+
+### When a session is wrong
+
+Edit one session and misspell a key — `threshhold` for `threshold` — and `plan`
+stops the build on the spot:
+
+```
+reportfast: case-02.json: will not load in xOpat v3 as authored -- params.threshhold:
+not in the viewer's params allowlist; `sanitizeAgainst` (src/app.ts) drops it and logs
+to the console, so the viewer boots as if you had not set it. Fix the JSON at those
+paths. This is the agent's door, so a key the viewer would merely drop is refused
+rather than warned about: off-allowlist means a typo until proven otherwise.
+```
+
+That message is the reason the tool is worth using over a folder of hand-typed
+links. The viewer would not have told you: it would have booted, ignored the key,
+and shown you a report whose threshold was silently never set. The rule comes from
+the pinned viewer source, not from a list someone maintains by hand.
+
+The exit code is 1 — a mistake in a file you can edit — as opposed to 2, which means
+the page was written and an image refused to resolve, which is a wrong run id or
+mount rather than a typo. [The command line](#the-command-line) has the table.
+
+## A report you write down
+
+A YAML manifest resolves slide and mask folders (or MLflow runs) for you, filters
+with `only:` and `min_layers:`, and is a file a colleague can diff, review and
+re-run. Worth keeping when a report is standing infrastructure; not worth it for a
+one-off answer to a question.
+
+[manifests/example.yaml](manifests/example.yaml) is the starting file. Copy it and
+change four things — `title:`, the background path, one mask path, a colour — then:
+
+```bash
+reportfast plan my.yaml
+```
+
+```
+My cohort: 2 cases, up to 1 overlays
+sources
+  Drive(data/slides)  2 files
+  Drive(data/masks)  2 files
+coverage  (cases that got a file from each layer)
+  Tissue: 2/2
+out      /home/me/work/../reports/example.html
+publish  not set
+```
+
+`coverage` is the number to look at: `Tissue: 2/2` says every case got that overlay.
+`Tissue: 3/32` says either a real gap in your results or a mistyped source, and the
+tool makes you decide which rather than quietly showing a slide with no mask. The
+`out` line is the copied file still carrying the shipped `out:`, resolved against the
+manifest's own folder — the fifth thing to change, and `out: report.html` is enough.
+
+```bash
+reportfast build my.yaml      # writes the HTML, then probes
+```
+
+Every manifest key is checked strictly: a key the library does not know stops the
+build and names the nearest candidate, because a `min_layer:` that silently did
+nothing reads as a report that was filtered. Paths resolve relative to the manifest,
+so the file is portable — including the relative ones above, which is what makes the
+copy-and-edit step portable too. A path that is not on this machine is an error
+naming the path, not an empty report. [The manifest keys](#manifest-keys) lists all
+of them.
+
+`manifests/dysplasia.yaml` is the same vocabulary pushed to its limits — MLflow run
+sources, class maps, `only:`, prose blocks — and resolves against this cluster's
+mount and runs, so it works here and nowhere else.
+
+## One design, three hundred cases
+
+This is the first tutorial's folder, made at scale — the door an agent works through
+when the report is three hundred cases rather than one. You write **one** session
+document with blanks in it; a Python loop fills the blanks per case; the same `build
+--sessions-dir` turns the folder into a page.
+
+```bash
+D=$(mktemp -d); mkdir -p $D/sessions
+$EDITOR $D/design.json                      # one session, slots where paths go
+reportfast plan --design $D/design.json --slot 0=slide --slot 1=mask
+```
+
+`plan --design` prints the design's slots, what the endpoint resolves to, and the
+Python that binds it. Binding is Python because a loop over 300 cases does not fit
+in a flag, and any flag that pretended to would need a case-list file:
 
 ```python
 import json
@@ -134,75 +248,153 @@ for name, slide, mask in cases:            # from your listing, not from a guess
 ```
 
 ```bash
-uv run reportfast build --sessions-dir $D/sessions -o $D/report.html
+reportfast build --sessions-dir $D/sessions -o $D/report.html --design $D/design.json
 ```
 
-**Write it down.** A YAML manifest resolves slide and mask folders (or MLflow runs)
-for you, applies `only:` and `min_layers:`, and is a file a colleague can diff,
-review and re-run. That is worth keeping when a report is standing infrastructure,
-and is not worth a one-off answer to a question.
+`load_design` is what makes hand-writing a session safe. `data[]` is a positional
+pool and every layer indexes into it, so the audit resolves each `dataReference` and
+refuses one that is out of range — the mistake a 300-case copy-paste eventually
+makes. It is gated once and every `bind` inherits that verdict.
+
+`--design` on the build records the design in the sidecar instead of `null`, and
+does **not** bind: pass `--slot` exactly as you passed it to `load_design`, because
+`{0: slide}` and `{0: slide, 1: mask}` are different reports from one JSON. What the
+record cannot check is whether the folder really came from that design — a bound
+session carries its DataIDs and no note of its parent — so the flag is a claim about
+your own loop.
+
+The folder of JSON is not required. `Composition` is the same build with the
+sessions held in memory instead, and [Four ways in](#four-ways-in) shows it.
+
+## Choosing a door
+
+| You have | Use |
+| --- | --- |
+| A folder of session JSON, or a few pasted sessions | `--sessions-dir` / `--session` |
+| Slide and mask folders, or MLflow runs, and want the recipe in a file | a YAML manifest |
+| Paths in a script already | `build_report()` |
+| Sessions from somewhere the library cannot list | `sessions_from:` in a manifest, or `Composition` |
+
+The door changes what is read, not what is checked. Every session walks the same
+gate, the same components are composed, the same probe runs, the same exit codes come
+back, and both doors write the same pair of files. Two build paths that "both probe"
+is how one of them eventually stops probing, so they literally share the code.
+
+Two commands exist to be run *before* you trust anything:
 
 ```bash
-uv run reportfast plan  manifests/dysplasia.yaml   # writes nothing; read this first
-uv run reportfast build manifests/dysplasia.yaml   # one HTML file, then probes
-xdg-open reports/dysplasia.html
+reportfast plan my.yaml                    # resolve and report; writes nothing
+reportfast build my.yaml --check-only      # build in memory and probe; write nothing
 ```
 
-`manifests/dysplasia.yaml` resolves against this cluster's mount and its MLflow
-runs, so those two lines work here and nowhere else. To point the tool at your own
-data, copy `manifests/example.yaml` and edit four things — `title:`, the
-background path, one mask path, a colour. `plan` exits 1 and names the key if a
-path is wrong, so copying it and running `plan` is the whole tutorial.
+And one that is never implied:
+
+```bash
+reportfast build my.yaml --publish         # the only write this tool performs
+```
+
+Publishing is `--publish` and nothing else — not a `publish:` key in the manifest,
+not CI, not a prompt. It repeats the run id back before uploading, and a manifest's
+`publish:` is a destination, not an instruction. On the manifest-less door it needs
+`--run`, because there is nothing to infer a destination from; there it puts the page
+on the run and writes **no local file** unless you also pass `-o`. CI has no publish
+step and a test fails the build if one ever appears.
+
+If you want the folder version of a report you built from the command line, `build
+… --emit-manifest` prints a manifest that would reproduce it, and writes nothing.
+
+### When the probe says "unreachable from here"
+
+`probe 0/N DataIDs open; 0 refused, N unreachable from here` is exit 0 and means the
+machine building the report could not ask the tile server:
+
+- **`0 refused` is the tell.** A *refused* DataID is the server answering no;
+  unreachable is it never answering. Refused means fix a `mount_root`, a protocol,
+  or a run. Unreachable means the request never left, or died on the way.
+- **A proxy is usually the reason, in both directions.** From a pod or CI runner
+  behind an HTTP proxy, requests to a cluster hostname can be sent *through* the
+  proxy and time out while the same host is reachable directly — and a hostname only
+  reachable via the proxy fails identically when you bypass it. Same message,
+  opposite fixes, one environment variable apart, so confirm with one direct request
+  before believing anything about the report.
+
+Then say which of the two you have. "Built, links unverified from here" is a complete
+and honest sentence about a report; "it works" is not, and a colleague who opens it
+and finds black cards has to rediscover the difference alone.
+
+### What is in the rest of this file
+
+[The command line](#the-command-line) is why the commands are split the way they
+are, and [Every option in one place](#every-option-in-one-place) is the flag and key
+reference, for when you only want to know whether a thing exists and what it
+defaults to. [Four ways in](#four-ways-in), [The base object](#the-base-object) and
+[The report](#the-report) are the Python API — the same machinery the CLI runs, for
+when a flag stops being enough. Then what a build leaves behind, runs in MLflow, the
+deployment coordinates, and the repo's layout and tests.
 
 ## The command line
 
-Three commands, three different blast radii, and two doors each: a manifest path,
-or authored sessions. `reportfast` is installed by the package (`uv sync --extra
-manifest` is enough for local folders); `uv run reportfast …` works in this
-checkout.
+Four commands. `plan` and `build` do the work, each through two doors — a manifest
+path, or authored sessions — and the other two answer questions without touching a
+report:
 
 ```bash
 reportfast plan  reports/foo.yaml              # resolve and report; writes nothing
 reportfast build reports/foo.yaml              # write the HTML, then probe every DataID
 reportfast build reports/foo.yaml --publish    # the only write to MLflow
 reportfast find  <run-id> --path tile_masks    # list what a run's artifacts hold
+reportfast skill where                         # would an agent on this box find the procedure
 reportfast --version                           # tool version + the viewer it was verified against
 
-# the same three gates, from authored sessions instead of a YAML file:
+# the same gates, from authored sessions instead of a YAML file:
 reportfast plan  --design $D/design.json --slot 0=slide --slot 1=mask
 reportfast build --sessions-dir $D/sessions --title "Cohort QC" -o $D/report.html
 reportfast build --sessions-dir $D/sessions --design $D/design.json  # + record the design
-reportfast build --sessions-dir $D/sessions --publish --run RUN   # page on the run only
-reportfast build --sessions-dir $D/sessions --emit-manifest   # print, never write
+reportfast build --sessions-dir $D/sessions --publish --run RUN      # page on the run only
+reportfast build --sessions-dir $D/sessions --emit-manifest          # print, never write
 ```
 
-The door changes what is read, not what is checked: every session walks the same
-gate, the same components are composed, the same probe runs, the same exit codes
-come back, and both doors write the same pair of files. Two build paths that "both
-probe" is how one of them stops probing, so they literally share the code.
+`reportfast` is the console script the package installs into the environment's `bin`.
+If it is not on your PATH — the normal state of a `uv` project — prefix each line
+with `uv run` or activate the venv first. In this checkout `uv run reportfast …` is
+what works, and `uv sync --extra manifest` is enough for local folders.
+
+Flags are in [Every option in one place](#every-option-in-one-place), and
+`reportfast <command> --help` is always the version that matches what you installed.
+What follows is only the reasoning a flag table cannot carry.
 
 `plan` is the artifact worth reading before a build: cases per layer, layers per
-case, files per source, what `min_layers:` dropped, and every warning. On
-`--design` it prints the design's slots, what the endpoint will resolve to, and the
-Python that binds it — it validates one design and binds nothing, because the loop
-over 300 cases is Python and a flag that could express it would need a case-list
-file. `plan` cannot write — there is no flag that makes it.
+case, files per source, what `min_layers:` dropped, and every warning. On `--design`
+it validates one design and binds nothing, because the loop over 300 cases is Python
+and a flag that could express it would need a case-list file. `plan` cannot write —
+there is no flag that makes it.
 
-`--design` means the same thing on `build` and does not bind there either: it
-names the design your loop bound the folder from, so the sidecar records one
-document instead of `null`. Pass `--slot` the way you passed it to `load_design`
-(`{0: slide}` and `{0: slide, 1: mask}` are different reports from one JSON), and
-it is gated on the way in — a design that would not boot stops the build rather
-than landing in a record that vouches for it. What the record cannot check is
-whether the folder really came from that design: a bound session carries its
-DataIDs and no note of its parent, so the flag is a claim about your own loop.
+`build` then asks the tile server about every DataID it just linked, because a report
+whose links were never resolved is a report nobody has checked: the viewer loads, the
+card is black, and nothing anywhere reports an error. `--check-only` runs the whole
+thing in memory and writes neither HTML nor sidecar; `--no-check` skips the probe
+when you know you cannot reach the server.
 
-`build` writes the HTML and then asks the tile server about every DataID in it,
-because a report whose links were never resolved is a report nobody has checked:
-the viewer loads, the card is black, and nothing anywhere reports an error.
-Publishing is `--publish` and nothing else — not a `publish:` key in the manifest,
-not CI — and it repeats the run id back before uploading. From the manifest-less
-door it needs `--run`, because there is nothing to infer a destination from.
+`--design` means the same thing on `build` and does not bind there either: it names
+the design your loop bound the folder from, so the sidecar records one document
+instead of `null`. Pass `--slot` the way you passed it to `load_design`, and the
+design is gated on the way in — one that would not boot stops the build rather than
+landing in a record that vouches for it.
+
+Endpoint flags work on `plan` and `build` (`--base-url`, `--wsi-base-url`,
+`--image-protocol`, `--mount-root`) and beat both the manifest's `endpoint:` and the
+environment, which is what lets one manifest be aimed at a second deployment without
+editing it. `build` takes `-o/--out`, `--run` (where to publish), and `--layout
+grid|rows` / `--no-grid`. The layout flag belongs to the authored door in meaning: a
+report from a manifest lays its cards out by that file's `grid:`, which a flag should
+not silently overrule. A block's name on the composition door is the component's own
+(`SlideCard`), not the manifest's snake_case (`slide_card`), and the error names the
+spelling that works rather than telling you to invent a component.
+
+`--publish` is the one write, it repeats the run id back before uploading, and on the
+manifest-less door it needs `--run` because there is nothing to infer a destination
+from — [Choosing a door](#choosing-a-door) is where that rule is argued. What lands
+where is in [What a build leaves behind](#what-a-build-leaves-behind).
 
 | Exit | Meaning |
 | --- | --- |
@@ -212,21 +404,12 @@ door it needs `--run`, because there is nothing to infer a destination from.
 | `3` | an optional extra this command needs is not installed |
 | `4` | nothing to work on: no such manifest, no such folder, no such run, no command, bad flag |
 
-1 and 2 are different failures with different fixes — one is a line in a file you
-can edit, the other is a run id or a mount that is wrong — so they do not share a
-code, and neither is argparse's default 2. 1 and 4 are split for the same reason:
-a folder that is not there is an errand, a session the viewer would drop is a
-mistake to go and fix in that one file, and a CI job should not have to read the
-message to tell them apart.
-
-Endpoint flags work on `plan` and `build` (`--base-url`, `--wsi-base-url`,
-`--image-protocol`, `--mount-root`) and beat both the manifest's `endpoint:` and
-the environment, which is what lets one manifest be aimed at a second deployment
-without editing it. `build` takes `-o/--out`, `--no-check`, `--check-only`
-(probe, write nothing — not the HTML, not the sidecar), `--run` (where to publish),
-and on the authored door `--layout grid|rows` / `--no-grid`. A block's name is the
-component's own (`SlideGrid`), not the manifest's snake_case (`slide_grid`), and the
-error says so rather than telling you to invent a component.
+1 and 2 are different failures with different fixes — one is a line in a file you can
+edit, the other is a run id or a mount that is wrong — so they do not share a code,
+and neither is argparse's default 2. 1 and 4 are split for the same reason: a folder
+that is not there is an errand, a session the viewer would drop is a mistake to go
+and fix in that one file, and a CI job should not have to read the message to tell
+them apart.
 
 ## Every option in one place
 

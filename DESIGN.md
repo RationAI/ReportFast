@@ -684,7 +684,11 @@ plus CLI tests for the door.
    regenerate); the old "never write session JSON" rule replaced by the gate's
    rules.
 7. **README refresh, again** — it currently documents manifest-as-default;
-   rewrite after step 4 exists, once, rather than twice.
+   rewrite after step 4 exists, once, rather than twice. **Done**: the file is
+   now intro → tutorial (authored door first, then the manifest, then one design
+   bound N times) → reference last. `test_cli.py` locates the reference section by
+   its heading and checks it against the parser both ways, so the heading
+   `## Every option in one place` is load-bearing.
 
 ## xOpat v3 facts this design leans on
 
