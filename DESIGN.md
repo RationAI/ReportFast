@@ -684,13 +684,15 @@ plus CLI tests for the door.
    regenerate); the old "never write session JSON" rule replaced by the gate's
    rules.
 7. **README refresh, again** — it currently documents manifest-as-default;
-   rewrite after step 4 exists, once, rather than twice. **Done**: the file is
-   now intro → installation → three tutorials in the order a person meets them
-   (authored sessions, then the manifest, then one design bound N times) →
-   reference last, written impersonally because it is team documentation and not
-   notes to whoever wrote it. `test_cli.py` locates the reference section by its
-   heading and checks it against the parser both ways, so the heading
-   `## Every option in one place` is load-bearing.
+   rewrite after step 4 exists, once, rather than twice. **Done**, twice: first
+   as a tutorial-length file, then cut to the shape this project actually ships
+   with — the intended flow is *install the lib, install the skill, ask the
+   agent*, so the README leads with those two commands, then a feature list,
+   then by-hand usage, then the option reference. Deep detail lives in the
+   skill references and DESIGN.md rather than being duplicated per section.
+   Impersonal register throughout: it is team documentation. `test_cli.py`
+   locates the reference section by its heading and checks it against the parser
+   both ways, so the heading `## Every option in one place` is load-bearing.
 
 ## xOpat v3 facts this design leans on
 
