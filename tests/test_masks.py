@@ -24,7 +24,6 @@ from report_fast import (  # noqa: E402
     XopatEndpoint,
     sessions_from_masks,
 )
-from report_fast.shader import ShaderType  # noqa: E402
 
 from test_mlflow import RUN, FakeClient, flow  # noqa: E402
 
@@ -204,7 +203,7 @@ def test_classes_make_a_class_map_that_leaves_the_background_clear():
         endpoint=ENDPOINT,
     )
     layer = shaders(sessions[0])["Annotations"]
-    assert layer["type"] == ShaderType.COLORMAP.value
+    assert layer["type"] == "colormap"
     assert layer["params"]["color"]["default"] == ["#ffffff", "#ff0000", "#00ff00"]
     assert layer["params"]["threshold"] == {
         "type": "advanced_slider",

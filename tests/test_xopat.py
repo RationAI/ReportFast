@@ -26,19 +26,9 @@ from contextlib import contextmanager
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-from report_fast.shader import (  # noqa: E402
-    PALETTE_COUPLED_TYPES,
-    ShaderConfig,
-    ShaderParameter,
-    ShaderType,
-    allowed_params,
-    classify_shader,
-    heatmap_shader,
-)
 from report_fast.xopat import (  # noqa: E402
     DEFAULT_BASE_URL,
     DEFAULT_WSI_BASE_URL,
-    PARAM_KEYS,
     XopatEndpoint,
     XopatError,
     build_session,
@@ -182,22 +172,10 @@ def test_lossless_can_be_turned_off():
     ]
 
 
-def test_shader_config_layer_is_accepted():
-    shader = heatmap_shader(
-        name="Prob", data_source=OVERLAY, color="#ff0000", threshold=20, opacity=0.5
-    )
-    session = build_session(SLIDE, layers=[shader], endpoint=endpoint())
-    layer = session["visualizations"][0]["shaders"]["layer_shader_0"]
-    assert layer["params"] == {
-        "color": "#ff0000",
-        "threshold": 20,
-        "inverse": False,
-        "opacity": 0.5,
-    }
-    assert layer["dataReferences"] == [1]
-
-
 def test_legacy_shader_conf_still_binds():
+    # v2 sat the params beside `type` instead of under `params`, so the wrapper
+    # is unwrapped. Keys v3 has no use for ride along -- the viewer drops what
+    # it does not read, and this library does not decide what exists.
     v2_layer = {
         "shader_conf": {
             "type": "heatmap",
@@ -205,22 +183,20 @@ def test_legacy_shader_conf_still_binds():
             "data": OVERLAY,
             "color": [1.0, 0.0, 0.0],
             "threshold": 30,
-            "min": 0,  # v2-only key, dropped by v3
+            "min": 0,
             "max": 255,
         }
     }
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        session = build_session(SLIDE, layers=[v2_layer], endpoint=endpoint())
+    session = build_session(SLIDE, layers=[v2_layer], endpoint=endpoint())
     layer = session["visualizations"][0]["shaders"]["layer_shader_0"]
     params = layer["params"]
+    assert layer["type"] == "heatmap"
     assert layer["name"] == "Prob"
     assert layer["dataReferences"] == [1]
     assert session["data"][1]["dataID"] == "data/predictions/prob_001.tif"
     assert params["threshold"] == 30
     assert params["color"] == [1.0, 0.0, 0.0]
-    assert "min" not in params and "max" not in params
-    assert any("min" in str(w.message) for w in caught)
+    assert params["min"] == 0 and params["max"] == 255
 
 
 def test_finished_layer_is_emitted_verbatim():
@@ -258,53 +234,6 @@ def test_group_layer_carries_members():
     assert layer["order"] == ["a"]
 
 
-def test_session_params_are_validated():
-    session = build_session(SLIDE, params={"toolBar": False}, endpoint=endpoint())
-    assert session["params"] == {"toolBar": False}
-    with raises(XopatError):
-        build_session(SLIDE, params={"toolabr": False}, endpoint=endpoint())
-    assert "toolBar" in PARAM_KEYS
-
-
-def test_allowlist_covers_what_a_viewer_export_emits():
-    # Shape of a session the viewer itself exported from a working v3 tab.
-    exported = {
-        "bypassCookies": True,
-        "theme": "auto",
-        "activeBackgroundIndex": [0],
-        "bypassCacheLoadTime": True,
-        "viewport": {"zoomLevel": 0.526, "point": {"x": 0.5, "y": 0.488}},
-    }
-    session = build_session(SLIDE, params=exported, endpoint=endpoint())
-    assert session["params"] == exported
-    # `point` is only read inside `viewport`; flat, the viewer drops it.
-    assert "point" not in PARAM_KEYS
-    with raises(XopatError):
-        build_session(SLIDE, params={"point": {"x": 0.5}}, endpoint=endpoint())
-
-
-def test_retired_shader_types_are_rejected():
-    for retired, replacement in (
-        ("classify", "colormap"),
-        ("segmentation", "colormap"),
-        ("bounding_box", "iconmap"),
-    ):
-        with raises(XopatError) as ctx:
-            build_session(
-                SLIDE, layers=[{"path": OVERLAY, "type": retired}], endpoint=endpoint()
-            )
-        assert replacement in str(ctx.exception)
-
-
-def test_unknown_shader_type_is_rejected():
-    with raises(XopatError):
-        build_session(
-            SLIDE,
-            layers=[{"path": OVERLAY, "type": "not-a-shader"}],
-            endpoint=endpoint(),
-        )
-
-
 def test_a_bare_mask_path_is_already_a_layer():
     # `masks=["/mnt/data/mask.tif"]` is the out-of-the-box spelling for a mask,
     # so a bare path must not be rejected; its stem labels the layer.
@@ -317,26 +246,6 @@ def test_a_bare_mask_path_is_already_a_layer():
 def test_layer_without_path_is_rejected():
     with raises(XopatError):
         build_session(SLIDE, layers=[{"type": "heatmap"}], endpoint=endpoint())
-
-
-def test_undeclared_params_warn_and_drop():
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        session = build_session(
-            SLIDE,
-            layers=[
-                {
-                    "path": OVERLAY,
-                    "type": "heatmap",
-                    "name": "Prob",
-                    "params": {"threshold": 5, "radius": 9},
-                }
-            ],
-            endpoint=endpoint(),
-        )
-    params = session["visualizations"][0]["shaders"]["layer_shader_0"]["params"]
-    assert params == {"threshold": 5}
-    assert any("radius" in str(w.message) for w in caught)
 
 
 def test_declared_params_survive_including_channel_override():
@@ -451,154 +360,3 @@ def test_endpoint_reads_environment():
         for key in [k for k in os.environ if k.startswith("XOPAT_")]:
             os.environ.pop(key)
         os.environ.update(saved)
-
-
-# ── shader param validation ─────────────────────────────────────────────────
-
-
-def test_opacity_is_declared_for_every_layer_type():
-    for shader_type in ShaderType:
-        assert "opacity" in allowed_params(shader_type)
-
-
-def test_classify_shader_keeps_palette_and_breaks_coupled():
-    shader = classify_shader(
-        name="Classes",
-        classes=3,
-        colors=["#ff0000", "#00ff00", "#0000ff"],
-        data_source=OVERLAY,
-    )
-    assert shader.shader_type is ShaderType.COLORMAP
-    assert ShaderType.COLORMAP in PALETTE_COUPLED_TYPES
-    params = shader.param_values()
-    assert params["color"]["default"] == ["#ff0000", "#00ff00", "#0000ff"]
-    assert params["color"]["steps"] == 3
-    assert params["threshold"]["breaks"] == [0.3333, 0.6667]
-    assert len(params["threshold"]["breaks"]) + 1 == len(params["color"]["default"])
-
-
-def test_classify_shader_can_leave_a_class_undrawn():
-    shader = classify_shader(
-        name="Annotations",
-        classes=3,
-        colors=["#ffffff", "#ff0000", "#00ff00"],
-        data_source=OVERLAY,
-        breaks=[0.25, 0.75],
-        mask=[0, 1, 1],
-    )
-    params = shader.param_values()
-    assert params["threshold"]["breaks"] == [0.25, 0.75]
-    assert params["threshold"]["mask"] == [0, 1, 1]
-    with raises(ValueError):
-        classify_shader(
-            name="Annotations",
-            classes=3,
-            colors=["#fff", "#f00", "#0f0"],
-            data_source=OVERLAY,
-            mask=[1, 1],
-        )
-
-
-def test_classify_shader_converts_rgb_tuples():
-    shader = classify_shader(
-        name="Classes", classes=2, colors=[(1, 0, 0), (0, 0, 1)], data_source=OVERLAY
-    )
-    assert shader.param_values()["color"]["default"] == ["#ff0000", "#0000ff"]
-
-
-def test_classify_shader_rejects_bad_class_counts():
-    with raises(ValueError):
-        classify_shader(name="c", classes=1, colors=["#fff"], data_source=OVERLAY)
-    with raises(ValueError):
-        classify_shader(
-            name="c", classes=3, colors=["#fff", "#000"], data_source=OVERLAY
-        )
-    with raises(ValueError):
-        classify_shader(
-            name="c",
-            classes=3,
-            colors=["#fff", "#000", "#0f0"],
-            data_source=OVERLAY,
-            breaks=[0.5],
-        )
-
-
-def test_validate_rejects_decoupled_palette():
-    shader = classify_shader(
-        name="c", classes=3, colors=["#fff", "#000", "#0f0"], data_source=OVERLAY
-    )
-    for param in shader.params:
-        if param.name == "threshold":
-            param.value = {"type": "advanced_slider", "breaks": [0.5]}
-    with raises(ValueError) as ctx:
-        shader.validate()
-    assert "threshold.breaks" in str(ctx.exception)
-
-
-def test_validate_rejects_undeclared_param_and_bad_opacity():
-    config = ShaderConfig(
-        shader_type=ShaderType.SOBEL, name="Edges", data_source=OVERLAY
-    )
-    config.add_param(
-        ShaderParameter(
-            name="not_a_param",
-            shader_type=ShaderType.SOBEL,
-            data_type=None,
-            value=1,
-        )
-    )
-    with raises(ValueError):
-        config.validate()
-    config.params = []
-    config.opacity = 1.5
-    with raises(ValueError):
-        config.validate()
-
-
-def test_heatmap_shader_bounds_its_threshold():
-    with raises(ValueError):
-        heatmap_shader(name="h", data_source=OVERLAY, threshold=0)
-    with raises(ValueError):
-        heatmap_shader(name="h", data_source=OVERLAY, threshold=101)
-
-
-def test_to_xopat_layer_emits_v3_keys():
-    layer = heatmap_shader(
-        name="Prob", data_source=OVERLAY, opacity=0.4
-    ).to_xopat_layer(data_references=[2])
-    assert layer == {
-        "type": "heatmap",
-        "name": "Prob",
-        "visible": 1,
-        "fixed": False,
-        "params": {
-            "color": "#fff700",
-            "threshold": 1,
-            "inverse": False,
-            "opacity": 0.4,
-        },
-        "dataReferences": [2],
-    }
-
-
-def main() -> int:
-    tests = [
-        (name, obj)
-        for name, obj in sorted(globals().items())
-        if name.startswith("test_") and callable(obj)
-    ]
-    failures = []
-    for name, test in tests:
-        try:
-            test()
-        except Exception as exc:  # noqa: BLE001 - report every failure kind
-            failures.append((name, exc))
-            print(f"FAIL {name}: {type(exc).__name__}: {exc}")
-        else:
-            print(f"ok   {name}")
-    print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
-    return 1 if failures else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

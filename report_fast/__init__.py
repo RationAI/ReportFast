@@ -42,7 +42,6 @@ that `data[]` indices are minted by :meth:`XopatSession.add_data` rather than
 typed.
 """
 
-from .audit import Finding, audit, split
 from .components import (
     Bullets,
     Chart,
@@ -56,6 +55,7 @@ from .components import (
 )
 from .config import BUILTIN_PRESET, SessionPreset, load_preset, parse_preset
 from .core import BASE_CSS, BaseComponent, ComponentRegistry, Report, Section
+from .layer import colormap_layer, heatmap_layer
 from .masks import Drive, Mask, MaskSource, MlflowRun, sessions_from_masks
 from .mlflow import Mlflow, MlflowError, Published, artifact_data_id
 from .session import (
@@ -66,10 +66,8 @@ from .session import (
     sessions_from_folder,
     sessions_from_paths,
 )
-from .shader import ShaderConfig, ShaderParameter, ShaderType
 from .xopat import (
     DEFAULT_BASE_URL,
-    PARAM_KEYS,
     XopatEndpoint,
     XopatError,
     mount_path,
@@ -94,7 +92,6 @@ __all__ = [
     "XopatEndpoint",
     "XopatError",
     "DEFAULT_BASE_URL",
-    "PARAM_KEYS",
     "mount_path",
     "thumbnail_url",
     "viewer_url",
@@ -114,10 +111,9 @@ __all__ = [
     "RawHtml",
     "SlideCard",
     "SlideGrid",
-    # layer specs
-    "ShaderConfig",
-    "ShaderParameter",
-    "ShaderType",
+    # layer specs -- the only place a shader type name is written
+    "colormap_layer",
+    "heatmap_layer",
     # masks and where they come from
     "Mask",
     "Drive",
@@ -129,8 +125,4 @@ __all__ = [
     "MlflowError",
     "Published",
     "artifact_data_id",
-    # the session gate and the viewer facts it reads
-    "audit",
-    "split",
-    "Finding",
 ]

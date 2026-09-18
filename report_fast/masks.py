@@ -42,9 +42,9 @@ from typing import (
     Union,
 )
 
+from .layer import colormap_layer, heatmap_layer
 from .mlflow import SLIDE_SUFFIXES, Mlflow
 from .session import SLIDE_PATTERNS, XopatSession
-from .shader import ShaderConfig, classify_shader, heatmap_shader
 from .xopat import XopatEndpoint, mount_path
 
 __all__ = [
@@ -204,33 +204,38 @@ class Mask:
     mask: Optional[Sequence[int]] = None
     params: Optional[Mapping[str, Any]] = None
 
-    def shader(self, data_id: str) -> ShaderConfig:
-        """This mask's layer for one slide, once its own file is known."""
+    def layer(self, data_id: str) -> Dict[str, Any]:
+        """This mask's layer dict for one slide, once its own file is known.
+
+        A plain dict: `classes`/`palette` draw a `colormap`, anything else a
+        `heatmap`, and `params` rides along unchanged on top. See
+        :mod:`report_fast.layer` for the two shapes and where they come from.
+        """
         if self.classes is not None:
             if not self.palette:
                 raise ValueError(
                     f"Mask({self.name!r}): {self.classes} classes need a palette"
                 )
-            shader = classify_shader(
+            layer = colormap_layer(
+                data_id,
                 name=self.name,
                 classes=self.classes,
-                colors=list(self.palette),
-                data_source=data_id,
+                palette=list(self.palette),
                 opacity=self.opacity,
                 breaks=list(self.breaks) if self.breaks is not None else None,
                 mask=list(self.mask) if self.mask is not None else None,
+                params=dict(self.params or {}),
             )
         else:
-            shader = heatmap_shader(
+            layer = heatmap_layer(
+                data_id,
                 name=self.name,
-                data_source=data_id,
                 color=self.color,
                 opacity=self.opacity,
+                params=dict(self.params or {}),
             )
-        shader.visible = self.visible
-        if self.params:
-            shader.with_params(self.params)
-        return shader
+        layer["visible"] = self.visible
+        return layer
 
 
 def _source_of(background: Background) -> MaskSource:
@@ -399,7 +404,7 @@ def case_matrix(
         sessions.append(
             XopatSession.from_slide(
                 every[case],
-                [mask.shader(indexes[mask.name][case]) for mask in picked],
+                [mask.layer(indexes[mask.name][case]) for mask in picked],
                 name=case,
                 params=params,
                 endpoint=endpoint,

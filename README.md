@@ -371,13 +371,12 @@ not share a code, and neither is argparse's default 2.
 
 ## Repository layout and tests
 
-`report_fast/` splits into the wire format (`xopat.py`, `session.py`, `config.py`,
-`shader.py` — stdlib only), composition (`build.py`, `manifest.py`, `compose.py`,
-`core.py`, `components/`), the checks (`contract.py`, `audit.py`, `verify.py`,
-`frozen.py`), and the edges (`provenance.py`, `skill.py`, `mlflow.py`, `__main__.py`).
-`schema/` is generated from the pinned viewer by `scripts/derive_schema.py`; nothing
-copies those facts by hand. `manifests/` holds standing reports, `skills/reportfast/`
-the agent's half, `examples/` fixtures, `reports/` generated HTML.
+`report_fast/` splits into the wire format (`xopat.py`, `session.py`, `layer.py`,
+`config.py` — stdlib only), rendering (`core.py`, `components/`), and the edges
+(`masks.py`, `mlflow.py`, `skill.py`, `__main__.py`). Nothing here copies the
+viewer's vocabulary: `layer.py` is the one file that names a shader type, and the
+agent reads the viewer's own source instead. `skills/reportfast/` is the agent's
+half, `examples/` fixtures, `reports/` generated HTML.
 
 ```bash
 uv run pytest tests     # 450+ tests; no server, no mount, no slide opened

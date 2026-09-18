@@ -10,11 +10,17 @@ Reference points in xopat 3.1.0 that constrain what this module emits:
   session parsing .... src/parse-input.js (`xOpatParseConfiguration`)
   session types ...... src/types/app.d.ts (`DataID` / `DataOverride` /
                        `BackgroundItem` / `VisualizationItem`)
-  params allowlist ... src/types/config.d.ts (`XOpatSetup`), defaulted by
+  params ............. src/types/config.d.ts (`XOpatSetup`), defaulted by
                        src/config.json (the `setup` block)
-  shader layers ...... report_fast.shader (transcribed from
-                       src/libs/flex-renderer/flex-renderer.js)
+  shader layers ...... src/libs/flex-renderer/flex-renderer.js
   tile/thumbnail ..... modules/rationai-wsi-tile-source/tile-source.js
+
+This module builds; it does not judge. There is no allowlist of params or
+shader types here, and no check that a session key exists upstream -- keeping
+one would mean this library had to change every time the viewer does. A session
+goes into the fragment exactly as it was assembled; the viewer decides what it
+means. The vocabulary lives where the viewer puts it: the files above, read at
+build time by whoever authors the session.
 
 v2 -> v3 differences encoded here:
 
@@ -47,16 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
-from . import contract
-from .shader import (
-    RETIRED_SHADER_TYPES,
-    ShaderConfig,
-    ShaderType,
-    UnknownShaderTypeError,
-    UNFILTERED_PARAM_TYPES,
-    accepts_param,
-    allowed_params,
-)
+from .layer import DEFAULT_LAYER_TYPE
 
 XOPAT_MAJOR = 3
 
@@ -77,140 +74,9 @@ TIFF_SUFFIXES = frozenset({".tif", ".tiff"})
 #: reaches the tile server as `&image_format=`.
 LOSSLESS_TILE_FORMAT = "png"
 
-#: Shader layer types xOpat v3 registers. An unknown type makes
-#: `$.FlexRenderer::createShaderLayer` throw, killing the whole layer.
-SHADER_TYPES = frozenset(shader_type.value for shader_type in ShaderType)
-
-#: Session `params` keys the viewer reads -- the hand-maintained half of the
-#: answer. `report_fast/schema/params-allowlist.json` holds the same list parsed
-#: out of the viewer by `scripts/derive_schema.py`, and its `--check` (run by the
-#: test suite) fails if table and artifact disagree in either direction.
-#:
-#: Why a literal here at all, when the generated file exists: a check that
-#: compared the artifact against a projection of itself would prove nothing, so
-#: this table stays an independent statement about the viewer, reviewable line by
-#: line in a diff. `param_keys()` in xopat/session validation takes the union of
-#: the two, so a key the viewer added but nobody transcribed still loads.
-#:
-#: What the viewer accepts at the *top level* of `params` is
-#: `XOpatSetup` keys (src/types/config.d.ts) UNION the defaults in
-#: src/config.json `setup`, because `sanitizeAgainst` (src/app.ts) filters
-#: incoming params against the defaults while the code reads the type -- so
-#: `branding`/`background`/`fetchAsync` (typed, no default) and
-#: `webGlPrecision`/`faultyTileThreshold`/`globalMenuMaxWidth`/the two
-#: `requestSchedulerUrgent*`/`syntheticPreviewLevel` (defaulted, not typed) are
-#: both real.
-#:
-#: What is NOT here: the `params.ui` children (`appBar`, `globalMenu`,
-#: `mainMenu`, `navigator`, and friends). They belong under `params.ui`.
-#: `getUiOption` does fall back to a flat `params[key]`, but `sanitizeAgainst`
-#: runs first and drops any top-level key the setup defaults do not carry, so
-#: four of the seven "legacy flat aliases" this table used to list were dead
-#: JSON -- accepted here, stripped in the browser, no warning anywhere. Only
-#: `scaleBar`/`statusBar`/`toolBar` are top-level `XOpatSetup` keys and thus
-#: survive flat (each folding to `params.ui.*`), and they stay.
-PARAM_KEYS = frozenset(
-    {
-        "activeBackgroundIndex",
-        "activeVisualizationIndex",
-        "background",
-        "backgroundColor",
-        "branding",
-        "bypassCache",
-        "bypassCacheLoadTime",
-        "bypassCloseConfirmation",
-        "bypassCookies",
-        "captureIndicator",
-        "captureIndicatorIdleMs",
-        "customBlending",
-        "debugMode",
-        "disablePluginsAutoload",
-        "disablePluginsUi",
-        "faultyTileThreshold",
-        "fetchAsync",
-        "globalMenuMaxWidth",
-        "grayscale",
-        "historySize",
-        "isStaticPreview",
-        "kineticPan",
-        "kineticPanFriction",
-        "kineticPanMinSpeed",
-        "locale",
-        "maxImageCacheCount",
-        "maxMobileWidthPx",
-        "notificationsPosition",
-        "permaLoadPlugins",
-        "preventNavigationShortcuts",
-        "quickActions",
-        "quickActionsMaxVisible",
-        "quickActionsUserEditable",
-        "requestSchedulerBgBusy",
-        "requestSchedulerBgIdle",
-        "requestSchedulerMaxStarveMs",
-        "requestSchedulerUrgentReserved",
-        "requestSchedulerUrgentStarveMs",
-        "reverseScroll",
-        "scaleBar",
-        "scrollPixelsPerNotch",
-        "scrollRequiresCtrl",
-        "scrollSpeed",
-        "sessionName",
-        "snapZoomToMagnification",
-        "statusBar",
-        "syntheticPreviewLevel",
-        "theme",
-        "tileCache",
-        "toolBar",
-        "ui",
-        "valueInspectorEnabled",
-        "viewport",
-        "visualizationInspectorEnabled",
-        "visualizationInspectorLensZoom",
-        "visualizationInspectorMode",
-        "visualizationInspectorRadiusPx",
-        "webGlPreferredVersion",
-        "webGlPrecision",
-        "webglDebugMode",
-        "zPlaneCacheEnabled",
-        "zPlaneCacheMaxItems",
-        "zPrefetchConcurrency",
-        "zPrefetchRadius",
-        "zRepaintOffViewport",
-    }
-)
-
 
 class XopatError(ValueError):
     """Raised when a session we are about to emit could not load in xOpat v3."""
-
-
-def param_keys() -> frozenset:
-    """Every top-level `params` key the pinned viewer keeps.
-
-    The union of the hand-written `PARAM_KEYS` and the derived allowlist, which
-    is deliberately not symmetric in what it buys: a key the viewer added last
-    week and nobody transcribed still loads (derived has it), and a key we carry
-    that the viewer dropped still *loads* too but is reported by
-    `derive_schema.py --check` -- because refusing a legal key is a bug we ship to
-    the user, while a stale key is a bug we ship to ourselves.
-    """
-    return PARAM_KEYS | contract.accepted_param_keys()
-
-
-def ui_param_keys() -> frozenset:
-    """The `params.ui` vocabulary, straight from the viewer's `XOpatUiSetup`."""
-    return contract.ui_param_keys()
-
-
-def flat_ui_aliases() -> frozenset:
-    """`params.ui` children that still work spelled flat on `params`.
-
-    A subset of `ui_param_keys()`, and the interesting part is what is *not* in
-    it: `appBar`, `globalMenu`, `mainMenu` and `navigator` are read by
-    `getUiOption`, which does fall back to a flat `params[key]`, but
-    `sanitizeAgainst` strips those keys before it ever gets the chance.
-    """
-    return contract.flat_ui_aliases()
 
 
 @dataclass(frozen=True)
@@ -274,9 +140,7 @@ def mount_path(
     root; pass `""` to mean "strip nothing".
     """
     file_path = PurePosixPath(Path(path).as_posix())
-    root = PurePosixPath(
-        DEFAULT_MOUNT_ROOT if mount_root is None else mount_root
-    )
+    root = PurePosixPath(DEFAULT_MOUNT_ROOT if mount_root is None else mount_root)
     try:
         return str(file_path.relative_to(root))
     except ValueError:
@@ -313,90 +177,26 @@ def _reject_inline_protocol(protocol: str) -> None:
         )
 
 
-def _sanitize_params(
-    shader_type: ShaderType,
-    params: Mapping[str, Any],
-    layer_name: str,
-    strict: bool = True,
-) -> Dict[str, Any]:
-    """Drop params the layer does not declare, which v3 would discard silently.
-
-    `strict=False` keeps them. That is the opt-out for a v3 field this library
-    has not modelled yet -- declared by the caller writing `params:` on a mask
-    row or `ShaderConfig.with_params`, and warned about once already in
-    `ShaderConfig.validate`, where the message prints what *is* declared. Two
-    warnings for one field is noise; silently dropping it is the bug.
-    """
-    if shader_type in UNFILTERED_PARAM_TYPES:
-        return dict(params)
-    declared = allowed_params(shader_type)
-    unknown = sorted(key for key in params if not accepts_param(shader_type, key))
-    if unknown and not strict:
-        return dict(params)
-    if unknown:
-        warnings.warn(
-            f"Shader layer {layer_name!r} (type={shader_type.value!r}) dropped params "
-            f"{unknown}; {shader_type.value} declares {sorted(declared)}. xOpat v3 drops "
-            "undeclared params silently too, so they would have been lost without a hint.",
-            stacklevel=3,
-        )
-    return {
-        key: value for key, value in params.items() if accepts_param(shader_type, key)
-    }
-
-
 def normalise_layer(layer: Any) -> Dict[str, Any]:
-    """Accept a bare path, a plain dict, the legacy `{'shader_conf': {...}}` shape, or a ShaderConfig."""
+    """A layer the caller wrote, as the spec `shader_layer` consumes.
+
+    Accepts a bare path, a plain dict, or the legacy `{'shader_conf': {...}}`
+    shape a v2 session carried. The `type` is whatever the caller wrote -- it
+    is not checked against a registry, because the registry is the viewer's
+    and this library does not keep a copy of it. A type the viewer does not
+    register kills its layer in the browser; read
+    `src/libs/flex-renderer/flex-renderer.js` for what exists today.
+    """
     if isinstance(layer, (str, Path)):
         # `masks=["tumor.tif"]`: the file stem becomes the layer's name.
         layer = {"path": layer}
-    if isinstance(layer, ShaderConfig):
-        values = layer.param_values()
-        return {
-            "path": layer.data_source,
-            "type": layer.shader_type,
-            "name": layer.name,
-            "visible": layer.visible,
-            "fixed": layer.fixed,
-            "params": values,
-            # Carried through so `shader_layer` knows not to filter: a layer
-            # whose author added unmodelled params on purpose (`params:` on a
-            # mask row, `with_params`) has already been warned once, in
-            # ShaderConfig.validate, with the declared list in the message.
-            # Filtering them here as well is what made door one a lie -- the
-            # param survived the shader and vanished at the wire.
-            "strict_params": layer.strict_params,
-            # Named here, at the one place that still knows which of these the
-            # caller added deliberately, so `XopatSession.add_layer` can record
-            # the opt-out and `validate()` does not refuse a documented door.
-            "carried_params": []
-            if layer.strict_params
-            else sorted(
-                key
-                for key in values
-                if not accepts_param(layer.shader_type, key)
-            ),
-        }
 
     if not isinstance(layer, Mapping):
         raise XopatError(
-            f"Shader layer must be a mapping or ShaderConfig, got {type(layer).__name__}"
+            f"Shader layer must be a path or a mapping, got {type(layer).__name__}"
         )
 
     conf = layer.get("shader_conf") or {}
-    raw_type = layer.get("type") or conf.get("type") or "heatmap"
-    try:
-        shader_type = ShaderType(raw_type)
-    except ValueError:
-        if raw_type in RETIRED_SHADER_TYPES:
-            raise XopatError(
-                f"Shader type {raw_type!r} was removed in xOpat v3. "
-                f"Use {RETIRED_SHADER_TYPES[raw_type]!r} instead."
-            ) from None
-        raise XopatError(
-            f"Unknown shader type {raw_type!r}; v3 registers {sorted(SHADER_TYPES)}. "
-            "createShaderLayer throws on anything else, so the layer would never render."
-        ) from None
 
     # v2 put params beside `type` inside shader_conf; v3 nests them under `params`.
     conf_structural = {"type", "name", "visible", "fixed", "data", "params"}
@@ -406,7 +206,7 @@ def normalise_layer(layer: Any) -> Dict[str, Any]:
 
     spec = {
         "path": layer.get("path") or conf.get("data"),
-        "type": shader_type,
+        "type": layer.get("type") or conf.get("type") or DEFAULT_LAYER_TYPE,
         "name": layer.get("name") or conf.get("name"),
         "visible": layer.get("visible", conf.get("visible", 1)),
         "fixed": layer.get("fixed", conf.get("fixed", False)),
@@ -494,8 +294,13 @@ def background_protocol(background_id: str, target: XopatEndpoint) -> Optional[s
 
 
 def shader_layer(spec: Mapping[str, Any], data_index: int) -> Dict[str, Any]:
-    """Build one v3 shader-layer entry from a normalised layer spec."""
-    shader_type: ShaderType = spec["type"]
+    """Build one v3 shader-layer entry from a normalised layer spec.
+
+    The `type` and `params` are the caller's and go through untouched. What
+    this function owns is the v3 wiring: the layer references data by **list**
+    index (`dataReferences`; the singular v2 `dataReference` is ignored without
+    a word), and `visible` is 1/0.
+    """
     if not spec.get("path"):
         raise XopatError(
             f"Shader layer {spec.get('name')!r} needs a path to bind to data."
@@ -503,19 +308,15 @@ def shader_layer(spec: Mapping[str, Any], data_index: int) -> Dict[str, Any]:
 
     name = spec.get("name") or Path(str(spec["path"])).stem
     layer = {
-        "type": shader_type.value,
+        "type": str(spec["type"]),
         "name": name,
         "visible": 1 if spec.get("visible", 1) else 0,
         "fixed": bool(spec.get("fixed", False)),
         "dataReferences": [data_index],
-        "params": _sanitize_params(
-            shader_type,
-            spec.get("params") or {},
-            name,
-            strict=spec.get("strict_params", True),
-        ),
+        "params": dict(spec.get("params") or {}),
     }
-    if shader_type is ShaderType.GROUP:
+    # `group` layers name member layers instead of carrying scalar controls.
+    if layer["type"] == "group":
         layer["shaders"] = dict(spec.get("shaders") or {})
         layer["order"] = list(spec.get("order") or [])
     return layer
@@ -536,10 +337,10 @@ def build_session(
         slide: Background slide, absolute path or DataID.
         layers: Overlay layers. Each is a mapping (`path`, `type`, `name`,
             `params`, optional `visible`/`fixed`; the v2 `shader_conf` wrapper is
-            accepted) or a `report_fast.shader.ShaderConfig`. A mapping that
-            already carries `dataReferences` is emitted verbatim.
+            accepted). A mapping that already carries `dataReferences` is
+            emitted verbatim.
         name: Display name for the background in the viewer.
-        params: Viewer `params` overrides; keys must be in `PARAM_KEYS`.
+        params: Viewer `params` overrides, kept as written.
         endpoint: Deployment coordinates; defaults to `DEFAULT_ENDPOINT`.
         visualization_name: Display name for the visualization.
         lossless: Ask the tile server for lossless overlay tiles, the v3 form of
@@ -591,10 +392,7 @@ def session_fragment(session: Mapping[str, Any]) -> str:
 
 __all__ = [
     "XOPAT_MAJOR",
-    "SHADER_TYPES",
-    "PARAM_KEYS",
     "XopatError",
-    "UnknownShaderTypeError",
     "XopatEndpoint",
     "DEFAULT_BASE_URL",
     "DEFAULT_WSI_BASE_URL",

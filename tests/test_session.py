@@ -135,7 +135,10 @@ def test_import_keeps_where_the_author_was_when_asked():
     assert session.params["bypassCacheLoadTime"] is True
 
 
-def test_unknown_params_warn_unless_strict():
+def test_unknown_params_are_kept_and_silent():
+    # There is no allowlist to be unknown against. A key the viewer has not
+    # heard of is dropped by the viewer, in the browser, where the user is
+    # looking; the library's job is to not lose it on the way there.
     config = {
         "params": {"theme": "dark", "totallyMadeUp": True},
         "data": [],
@@ -144,13 +147,8 @@ def test_unknown_params_warn_unless_strict():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         session = XopatSession.from_config(config)
-    assert any("totallyMadeUp" in str(warning.message) for warning in caught)
-    assert session.params["totallyMadeUp"] is True, (
-        "kept -- the viewer drops it, the user keeps it"
-    )
-
-    with raises(XopatError):
-        XopatSession.from_config(config, strict=True)
+    assert not caught, "nothing is judged, so nothing is announced"
+    assert session.params == {"theme": "dark", "totallyMadeUp": True}
 
 
 def test_unknown_top_level_keys_are_kept():
@@ -159,11 +157,8 @@ def test_unknown_top_level_keys_are_kept():
         "background": [{"dataReference": 0}],
         "goals": [{"x": 1}],
     }
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        session = XopatSession.from_config(config)
-        again = XopatSession.from_config(session.to_config()).to_config()
-    assert any("goals" in str(warning.message) for warning in caught)
+    session = XopatSession.from_config(config)
+    again = XopatSession.from_config(session.to_config()).to_config()
     assert session.to_config()["goals"] == [{"x": 1}]
     assert again == session.to_config(), "a kept field survives a second import"
 
@@ -184,12 +179,10 @@ def test_import_of_json_text_and_dict_agree():
 
 
 def test_import_rejects_a_dangling_background_reference():
-    # The one finding the paste path does not soften. Dropping a colleague's
+    # The one thing the paste path does not soften. Dropping a colleague's
     # `params` key would be rude; shipping a page that does not boot would be a
     # lie, and `src/parse-input.js` hard-fails here rather than carrying on.
     config = {"data": ["a.tif"], "background": [{"dataReference": 4}]}
-    with raises(XopatError):
-        XopatSession.from_config(config, strict=True)
     with raises(XopatError) as raised:
         XopatSession.from_config(config)
     assert "background[0].dataReference" in str(raised.exception), (
@@ -198,6 +191,9 @@ def test_import_rejects_a_dangling_background_reference():
 
 
 def test_dangling_shader_reference_is_caught_before_the_link_ships():
+    # An out-of-range `dataReferences` binds no overlay: the layer silently
+    # renders its defaults over the wrong slide, which is the failure a reader
+    # of the report cannot see.
     config = {
         "data": ["a.tif"],
         "background": [{"dataReference": 0, "visualizationIndex": 0}],
@@ -205,8 +201,9 @@ def test_dangling_shader_reference_is_caught_before_the_link_ships():
             {"shaders": {"l": {"type": "heatmap", "dataReferences": [7]}}}
         ],
     }
-    with raises(XopatError):
-        XopatSession.from_config(config, strict=True)
+    with raises(XopatError) as raised:
+        XopatSession.from_config(config)
+    assert "dataReferences" in str(raised.exception)
 
 
 def test_multi_background_case_imports_intact():
