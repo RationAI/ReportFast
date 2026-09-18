@@ -12,10 +12,10 @@ Two layouts, one answer. A wheel install carries the skill at
 checkout two directories up is checked too. An agent in either case is told the
 same thing: `reportfast skill show`.
 
-Why the file lives in one place: the skill and the gate must not drift, which is
-the same argument `contract.py` makes about the schema. Copying a second `SKILL.md`
-into the package by hand would put back the two sources of truth that `derive_schema.py
---check` exists to prevent.
+Why the file lives in one place: the procedure the agent follows and the code it
+describes must not drift. Copying a second `SKILL.md` into the package by hand would
+restore exactly the two-sources-of-truth problem the derived schema was deleted for --
+two copies of one set of facts, and no check that keeps them together.
 """
 
 from __future__ import annotations

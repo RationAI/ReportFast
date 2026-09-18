@@ -296,9 +296,10 @@ cannot quietly become a registry.
 
 ## Tests that exist because of a specific failure
 
-The suite is 181 tests, self-contained: no server, no mount, no slide opened, no
-network. Most of it is ordinary behaviour. These are the ones that exist because
-something went wrong, and they are the ones worth reading before changing anything:
+The suite is self-contained: no server, no mount, no slide opened, no network — the
+`urllib.parse` calls in it decode a fragment, they do not open one. Most of it is
+ordinary behaviour. These are the ones that exist because something went wrong, and
+they are the ones worth reading before changing anything:
 
 - `test_there_is_no_copy_of_the_viewer_vocabulary` — greps the sources for a shader
   registry or a `params` allowlist. The only durable defence against the gate coming

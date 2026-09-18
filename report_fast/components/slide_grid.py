@@ -192,10 +192,10 @@ class SlideCard(BaseComponent):
         # from the wire format where a person expects prose. The number stays
         # because plugins are loaded on boot and can change what a card looks like,
         # which is worth knowing when one renders oddly. The names themselves are
-        # in the session JSON, and no label table for them lives here -- the
-        # contract derives only "plugin id -> options", so a hand-typed mapping
-        # would be a second source of truth, which is what `derive_schema.py --check`
-        # exists to make impossible.
+        # in the session JSON and no label table for them lives here: a hand-typed
+        # plugin-id-to-label mapping would be a second source of truth about a
+        # deployment this library does not run, which is the thing the derived
+        # schema used to be and why it was deleted.
         if session.plugins:
             parts.append(f"{len(session.plugins)} plugins")
         return " · ".join(parts)
