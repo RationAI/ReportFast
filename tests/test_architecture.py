@@ -211,6 +211,60 @@ def test_no_public_name_escapes_html():
         )
 
 
+#: A workflow line that would actually upload. Comments are stripped before this
+#: is applied, because the workflow that must not publish is the one that spends
+#: five lines explaining why it must not publish.
+PUBLISH_STEP = re.compile(r"log_artifact|\bpublish|--upload|\baws\b.*cp|\bs3://", re.I)
+
+
+def test_no_workflow_publishes():
+    """Publishing is never a CI side effect, and this is where that is enforced.
+
+    `.github/workflows/ci.yml` says so in a comment, and a comment is not a check.
+    The rule it states -- publishing is never implied by a manifest key, a CI job,
+    or a prompt -- is the one promise in this project that cannot be recovered from
+    after the fact: an artifact logged to someone's run is in the record, and there
+    is no clean way to take it back out.
+
+    So this greps the workflows, not the Python. A `publish` step is what a
+    reasonable person adds while trying to be helpful -- "build the report and put
+    it where the run is" -- and it would pass review, pass tests, and upload.
+    """
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    assert workflows, "the guard is pointless with no workflow to read"
+    offenders = {}
+    for path in workflows:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        hits = [
+            f"{path.name}:{number}: {line.strip()}"
+            for number, line in enumerate(lines, 1)
+            # `#` is the whole first token only: `url#fragment` is a line to check.
+            if not line.lstrip().startswith("#")
+            and PUBLISH_STEP.search(line)
+        ]
+        if hits:
+            offenders[path.name] = hits
+    assert not offenders, (
+        f"a workflow appears to publish: {offenders}. Publishing happens when a "
+        "person asks for `Mlflow.publish()`; a pipeline has nobody to ask"
+    )
+
+
+def test_every_rule_ci_claims_in_a_comment_is_a_test_that_exists():
+    """CI's comment cites a test by name; that name has to resolve.
+
+    It cited `test_no_workflow_publishes` for a while after that test was deleted
+    with the CLI it belonged to, which is worse than no comment: the next reader
+    reasonably does not go looking for the check themselves.
+    """
+    cited = set()
+    for path in sorted((ROOT / ".github" / "workflows").glob("*.yml")):
+        cited.update(re.findall(r"\btest_[a-z0-9_]+", path.read_text(encoding="utf-8")))
+    body = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "tests").glob("*.py"))
+    missing = sorted(name for name in cited if f"def {name}" not in body)
+    assert not missing, f"CI cites tests that do not exist: {missing}"
+
+
 def test_the_package_imports_without_the_optional_extras():
     """`report_fast` alone renders. mlflow is an extra, and so is the renderer.
 

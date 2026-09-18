@@ -313,6 +313,36 @@ def test_the_meta_line_counts_plugins_rather_than_naming_them():
     )
 
 
+def test_the_same_report_renders_byte_identical_html():
+    """Two builds of the same report are the same bytes.
+
+    A report is mailed, diffed, and re-run against a redone mask run; any byte
+    that varies for no reason makes all three of those harder. The variation this
+    rules out is the one that creeps in unnoticed: `BaseComponent` falls back to a
+    random id, which is fine for one component on a page and wrong for a file
+    someone diffs tomorrow -- so `Report` renumbers the ids it generated itself,
+    and a component the caller named keeps the name it was given.
+    """
+
+    def build() -> str:
+        sessions = [session(), session()]
+        return Report(
+            title="reproducible",
+            subtitle="two cards",
+            preamble="Nothing here varies.",
+            blocks=[
+                SlideGrid(sessions=sessions, endpoint=endpoint(), title="slides"),
+                Section(title="notes", blocks=[Text("a note")]),
+            ],
+        ).to_html()
+
+    first, second = build(), build()
+    assert first == second, "the same report produced different bytes"
+    # A caller-named id survives, because the point is that it was named.
+    named = Report(blocks=[Text("kept", id="caller-chosen")]).to_html()
+    assert 'id="caller-chosen"' in named
+
+
 def test_card_embeds_the_viewer_when_asked():
     html = to_xml(SlideCard(session(), embed=True).render())
     assert "<iframe" in html

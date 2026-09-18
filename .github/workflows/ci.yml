@@ -1,14 +1,15 @@
 # Test and lint only. There is deliberately no publish step here, and one must
-# never be added: `reportfast build --publish` is the only path that uploads, it
-# is never implied by a manifest key, a CI job, or a prompt, and this workflow has
-# no credentials with which to upload even if someone typed the flag. The rule is
-# asserted by `test_no_workflow_publishes` rather than trusted to review.
+# never be added: `Mlflow.publish()` is the only path that uploads, it is never
+# implied by a config key, a CI job, or a prompt, and this workflow has no
+# credentials with which to upload even if someone added a step. The rule is
+# asserted by `test_no_workflow_publishes` rather than trusted to review, and
+# this comment is itself checked by `test_every_rule_ci_claims_in_a_comment_is_a_test_that_exists`.
 #
 # The `dev` group is what a contributor runs, and it declares the package with
-# both extras -- so this installs the YAML and MLflow paths rather than skipping
-# them. Both are optional in the package precisely so that `import report_fast`
-# works without them, which means a base-install run here would quietly test a
-# subset and report it as green.
+# its one extra -- so this installs the MLflow path rather than skipping it. That
+# path is optional in the package precisely so that `import report_fast` works
+# without it, which means a base-install run here would quietly test a subset and
+# report it as green.
 
 name: test
 
@@ -45,9 +46,9 @@ jobs:
         run: uv run ruff check .
 
       - name: Test
-        # No `XOPAT_VIEWER` is set, so the two checks that compare the derived
-        # contract against a viewer checkout skip rather than fail -- they need a
-        # second private repository, and `test_contract.py` skips rather than
-        # quietly asserting nothing. Everything else runs, including the docstring
-        # examples and the tests that keep the prose in step with the code.
+        # Everything runs here: there is no viewer checkout to compare against,
+        # and nothing needs one any more -- the library holds no copy of the
+        # viewer's vocabulary to drift. So the suite is self-contained: no server,
+        # no mounted slide, no network, alongside the docstring examples and the
+        # tests that keep the prose in step with the code.
         run: uv run pytest -q

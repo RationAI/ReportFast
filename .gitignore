@@ -8,14 +8,13 @@ __pycache__/
 build/
 dist/
 
-# Generated reports are build output; the manifests that produce them are not.
-# (DESIGN.md: same input, byte-identical HTML — regenerable freely.)
+# A report is generated output, so it is not committed. What produces it — the
+# script the agent writes — is the record, and DESIGN.md's byte-identical
+# guarantee means the page can be rebuilt whenever it is wanted again.
 reports/*.html
-*.provenance.json
-# `DEFAULT_OUT` is `report.html` in the working directory, so a build with no -o
-# from the repo root lands here. Its sidecar was already ignored by the rule above
-# and this file was not, which left a build output looking like untracked source.
-# Root-only on purpose: `/` keeps a checked-in HTML somewhere else from vanishing.
+# `report.html` is the output name every snippet in this repository uses, so a
+# snippet run from the repo root drops one here. Root-only on purpose: `/` keeps a
+# checked-in HTML somewhere else from vanishing under a wildcard.
 /report.html
 
 # Local MLflow tracking stores from ad-hoc publishes (`file:mlruns` experiments)

@@ -20,6 +20,8 @@ Pytest:   pytest tests/test_skill.py
 
 from __future__ import annotations
 
+import ast
+import dataclasses
 import re
 import shutil
 import sys
@@ -276,37 +278,6 @@ def test_a_reference_that_is_not_there_exits_one():
 # ── the class of bug this whole module exists to kill ───────────────────────
 
 
-def test_the_skill_tells_an_agent_only_commands_that_work_from_an_install():
-    """Every command in SKILL.md must work where the skill gets installed.
-
-    The skill used to say "check it from anywhere: `uv run python -c …`", which is
-    true inside this repo and false everywhere `uv add report-fast` was used -- and
-    an install is the only reason the sentence matters. So: no command the skill
-    tells an agent to run may depend on a checkout. `uv run` and `scripts/derive_schema.py`
-    are allowed only when the same line says they are repo steps.
-    """
-    text = skill_module.skill_text()
-    lines = [line.strip() for line in text.splitlines()]
-
-    checkout_only = ("uv run ", "scripts/derive_schema.py")
-    # Word-boundary on purpose: `"repo" in line` is satisfied by the word
-    # "reportfast", which would let every command line in the file pass the check
-    # without saying anything about where it works. "project" counts because
-    # `uv run reportfast` is right in any project that installed the library --
-    # the complaint is only about a line that names no place at all.
-    qualified = re.compile(r"\brepo\b|\bcheckout\b|\bproject\b|never from an install")
-    seen = 0
-    for line in lines:
-        if not any(marker in line for marker in checkout_only):
-            continue
-        seen += 1
-        assert qualified.search(line), f"line needs a command that works from an install: {line}"
-    assert seen >= 2, f"expected the repo-only steps to appear and be labelled; saw {seen}"
-
-    # And the positive half: the install-portable spellings are taught.
-    assert "python -c" in text, "the stamp check should use plain python"
-
-
 def test_the_skill_names_examples_by_a_reference_the_code_answers():
     """The prose and the lookup are two files; this is the seam between them."""
     text = skill_module.skill_text()
@@ -315,40 +286,165 @@ def test_the_skill_names_examples_by_a_reference_the_code_answers():
     assert skill_module.reference("examples/dysplasia_case.json").startswith("{")
 
 
-def test_the_skill_tells_the_truth_about_a_published_build_with_no_out():
-    """The paragraph this guards is the one an agent reads at the moment it is
-    about to look for a file that was never written.
+# ── the skill's API claims, checked against the package ─────────────────────
+#
+# These replaced three tests that split SKILL.md on literal sentences and checked
+# what fell out. Those could only fail on a rename, which is why three of them
+# were still asserting a `build --publish`/`--design` CLI that had been deleted:
+# the strings they hunted survived the thing they described. What is checked here
+# instead is a *claim* -- that a name the skill tells someone to reach for exists
+# -- so it fails when the claim goes false and not when the prose is reworded.
 
-    Publishing with no `-o` writes nothing locally -- ruled after the leak, and
-    enforced in `_door_out`. The skill said nothing about it, so an agent that
-    published and then went looking for `report.html` concluded the build had
-    failed. Prose about a behaviour the CLI already implements needs a seam test,
-    or it drifts the next time the behaviour moves.
+#: Backticked names that match `API_SHAPE` and are exempt from `__all__`, each
+#: with the reason. Kept short on purpose: the pattern reads only PascalCase and
+#: snake_case, so a session field (`params`, `sessionName`), a dotted path
+#: (`params.ui`), a filename or an English word never lands here. Every entry is
+#: checked below, so one that stops being used fails a test.
+NOT_LIBRARY_API = {
+    # Named in the one paragraph explaining that they were removed.
+    "Prose": "listed as deleted",
+    "MetricTable": "listed as deleted",
+    "Chart": "listed as deleted",
+    "RawHtml": "listed as deleted",
+    # A keyword argument of an exported class, not a name you import.
+    "mount_root": "endpoint field",
+    # An environment fact the skill tells someone to check for.
+    "PATH": "the shell's",
+}
+
+#: Matches a backticked name a reader could believe is this package's API: a
+#: class shape, or a snake_case identifier. Deliberately not everything -- a
+#: dotted session path (`params.ui`) and a sentence fragment should not need
+#: exempting.
+API_SHAPE = re.compile(r"^[A-Z][A-Za-z0-9]*$|^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+
+
+def _prose(text: str) -> str:
+    """SKILL.md without its fenced blocks: what the file *asserts*, not what it runs."""
+    return re.sub(r"```.*?```", "", text, flags=re.S)
+
+
+def test_every_api_name_the_skill_prose_names_is_public():
+    """A name in prose is an instruction, and an invented one is followed.
+
+    Writing these docs produced three names that did not exist and surfaced one
+    that did but was unreachable from the package root; none of the 174 passing
+    tests could see either. This one can, in both directions: a name that never
+    existed, and a name that stops existing.
     """
-    text = skill_module.skill_text()
-    publish = text.split("**`--publish` is asked for")[1].split("## ")[0]
-    assert "no `-o`" in publish, "the publish paragraph lost the -o rule"
-    assert "the run only" in publish, "quote the line the agent will actually see"
-    assert "-o FILE" in publish, "say how to ask for the local copy as well"
+    import report_fast
+
+    unreachable = [name for name in NOT_LIBRARY_API if not API_SHAPE.match(name)]
+    assert not unreachable, f"NOT_LIBRARY_API exempts names the pattern cannot find: {unreachable}"
+
+    published = set(report_fast.__all__)
+    named = {
+        token
+        for token in re.findall(r"`([A-Za-z_][A-Za-z0-9_]*)`", _prose(skill_module.skill_text()))
+        if API_SHAPE.match(token)
+    }
+    invented = sorted(named - published - set(NOT_LIBRARY_API))
+    assert not invented, f"SKILL.md names as available, but it is not: {invented}"
+    # An exemption left behind is a name the prose no longer says, which makes the
+    # list above a claim about something that is not there.
+    unused = sorted(set(NOT_LIBRARY_API) - named)
+    assert not unused, f"NOT_LIBRARY_API exempts names the skill no longer says: {unused}"
+    # And the guard must still be refusing something, or it is checking nothing.
+    assert set(NOT_LIBRARY_API) & named, "the guard exempts nothing any more"
 
 
-def test_the_skill_teaches_design_recording_on_the_build():
-    """`build --design` belongs in the design flow: an agent holding the design and
-    the temp folder is exactly the caller who can record it, and the default --
-    `design: null` -- loses the one document that makes the report rebuildable once
-    the folder is deleted.
+def test_the_deleted_components_are_named_only_where_they_are_named_as_deleted():
+    """`Prose`, `MetricTable`, `Chart`, `RawHtml` may appear in exactly one place.
 
-    Scoped to the section that binds a design, not to every `build` line: the
-    quick reference above it covers authored sessions that came from nowhere in
-    particular, and naming a design there would tell an agent to claim one they do
-    not have.
+    That paragraph exists to stop someone reinventing them, so it has to name
+    them. Anywhere else, the same backticks read as "this is available" -- which
+    is how a deleted component comes back: not by being re-added, but by being
+    suggested in prose an agent follows.
     """
+    deleted = ("Prose", "MetricTable", "Chart", "RawHtml")
     text = skill_module.skill_text()
-    flows = [chunk for chunk in text.split("```bash") if "design.bind(" in chunk]
-    assert flows, "the skill lost the bind-in-Python flow"
-    build = flows[0].split("```")[0]
-    assert "--design" in build, build
-    assert "--slot" in build, "the slots are part of the record, so teach them"
+    marker = "There used to be ten components"
+    start = text.index(marker)
+    paragraph = text[start : text.index("\n\n", start)]
+    elsewhere = {
+        name: text.count(f"`{name}`") - paragraph.count(f"`{name}`")
+        for name in deleted
+        if text.count(f"`{name}`") != paragraph.count(f"`{name}`")
+    }
+    assert not elsewhere, f"named outside the paragraph that deletes them: {elsewhere}"
+    assert all(name in paragraph for name in deleted), (
+        "the paragraph naming what was removed is what stops it being reinvented"
+    )
+
+
+def test_the_page_arguments_the_skill_lists_are_the_real_ones():
+    """`Report` takes `title`, `subtitle`, ... -- and that list is a claim.
+
+    Field names are the one part of the prose an agent types into a constructor,
+    so it is checked against the dataclass rather than against a copy: adding a
+    field to `Report` and not saying so, or naming one that was renamed, fails
+    here rather than in someone's script.
+    """
+    from report_fast import Report
+
+    text = skill_module.skill_text()
+    start = text.index("`Report` takes")
+    sentence = text[start : text.index("\n", start)]
+    listed = set(re.findall(r"`([a-z_]+)`", sentence))
+    fields = {field.name for field in dataclasses.fields(Report)}
+    assert listed, f"nothing was listed as an argument in: {sentence}"
+    wrong = sorted(listed - fields)
+    assert not wrong, f"the skill says Report takes {wrong}, which it does not: {sentence}"
+    assert "preamble" in listed, (
+        "preamble is the page's only prose besides the title and subtitle; teach it"
+    )
+
+
+def _bundled_docs() -> dict:
+    """Every markdown file the skill ships, by name -- SKILL.md and the references."""
+    found = {"SKILL.md": skill_module.skill_dir() / "SKILL.md"}
+    found.update(
+        {
+            f"references/{path.name}": path
+            for path in sorted((skill_module.skill_dir() / "references").glob("*.md"))
+        }
+    )
+    return {name: path.read_text(encoding="utf-8") for name, path in found.items()}
+
+
+def test_every_python_snippet_in_the_bundle_is_valid_and_imports_only_public_names():
+    """Every snippet in SKILL.md *and the references* parses, and imports only exports.
+
+    Snippets are the most-copied text in the bundle, which makes them the most
+    damaging place for a typo or a name that was never exported. Checking the
+    references too costs nothing and needs no exemption list at all: a name in a
+    fenced `from report_fast import …` is unambiguously meant to be importable.
+
+    Parsing rather than running is the deliberate limit -- running would need a
+    slide folder that exists, and three snippets were executed by hand while these
+    files were written. What this catches for free is the case a hand run does not:
+    a snippet that was correct once and drifted from a rename.
+    """
+    import report_fast
+
+    published = set(report_fast.__all__)
+    total = 0
+    for name, text in _bundled_docs().items():
+        for number, block in enumerate(re.findall(r"```python\n(.*?)```", text, flags=re.S), 1):
+            total += 1
+            where = f"{name} block {number}"
+            tree = ast.parse(block, filename=where, mode="exec")  # SyntaxError is the failure
+            imported = {
+                alias.name
+                for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.startswith("report_fast")
+                for alias in node.names
+            }
+            unknown = sorted(imported - published)
+            assert not unknown, f"{where} imports {unknown}, which is not exported"
+    assert total >= 6, f"the bundle should carry its snippets; found {total}"
 
 
 if __name__ == "__main__":

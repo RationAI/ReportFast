@@ -206,6 +206,42 @@ def test_dangling_shader_reference_is_caught_before_the_link_ships():
     assert "dataReferences" in str(raised.exception)
 
 
+def test_the_multi_background_case_still_carries_its_one_stale_param():
+    """The fixture keeps an invented `inverse` on three `colormap` layers, on purpose.
+
+    `heatmap` declares `inverse` and `colormap` does not, so those three are dropped
+    by the viewer in silence while the identically-spelled param on the sibling
+    `dose` layers is fine. This is the clearest illustration in the repository of
+    what the library deliberately does *not* catch -- there is no copy of the
+    viewer's per-type field vocabulary here to catch it against, and a stale copy
+    would reject sessions the deployed viewer renders fine.
+
+    So the fact is pinned and nothing more: the fixture keeps teaching the lesson,
+    and no one quietly "fixes" it into uselessness. An earlier test asserted six
+    audit outcomes; the audit went, and the invented key did not go with it.
+    """
+    config = fixture("multi_background_case.json")
+    stale, fine = [], []
+    for visualization in config.get("visualizations", []):
+        shaders = visualization.get("shaders") or {}
+        for shader in shaders.values() if isinstance(shaders, dict) else shaders:
+            if "inverse" in (shader.get("params") or {}):
+                (stale if shader.get("type") == "colormap" else fine).append(shader)
+    assert len(stale) == 3 and len(fine) == 3, (
+        f"the fixture's invented-key lesson changed shape: {len(stale)} stale, "
+        f"{len(fine)} legitimate"
+    )
+    # And it survives import untouched -- the library keeps what it cannot judge.
+    session = XopatSession.from_config(config)
+    kept = sum(
+        1
+        for visualization in session.visualizations
+        for shader in (visualization.get("shaders") or {}).values()
+        if "inverse" in (shader.get("params") or {})
+    )
+    assert kept == 6, "import dropped a key it has no business judging"
+
+
 def test_multi_background_case_imports_intact():
     session = XopatSession.from_config(fixture("multi_background_case.json"))
     assert len(session.data) == 7

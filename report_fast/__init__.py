@@ -46,7 +46,15 @@ from .components import SlideCard, SlideGrid
 from .config import BUILTIN_PRESET, SessionPreset, load_preset, parse_preset
 from .core import BASE_CSS, BaseComponent, ComponentRegistry, Report, Section
 from .layer import colormap_layer, heatmap_layer
-from .masks import Drive, Mask, MaskSource, MlflowRun, sessions_from_masks
+from .masks import (
+    CaseMatrix,
+    Drive,
+    Mask,
+    MaskSource,
+    MlflowRun,
+    case_matrix,
+    sessions_from_masks,
+)
 from .mlflow import Mlflow, MlflowError, Published, artifact_data_id
 from .session import (
     SessionTemplate,
@@ -102,6 +110,8 @@ __all__ = [
     "Drive",
     "MlflowRun",
     "MaskSource",
+    "case_matrix",
+    "CaseMatrix",
     "sessions_from_masks",
     # runs (only these four touch mlflow, and only when they have to)
     "Mlflow",
