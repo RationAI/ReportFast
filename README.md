@@ -367,7 +367,7 @@ not share a code, and neither is argparse's default 2.
 | A real manifest at full stretch | [manifests/dysplasia.yaml](manifests/dysplasia.yaml) and [manifests/example.yaml](manifests/example.yaml) |
 | Session fixtures | [examples/README.md](examples/README.md) |
 | Why it is built this way, and what was ruled out | [DESIGN.md](DESIGN.md) |
-| MLflow from Python | `report_fast/mlflow.py`, `scripts/test_mlflow.py` |
+| MLflow from Python | `report_fast/mlflow.py` |
 
 ## Repository layout and tests
 

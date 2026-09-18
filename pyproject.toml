@@ -21,7 +21,8 @@ reportfast = "report_fast.__main__:main"
 mlflow = ["mlflow>=2.8,<3"]
 
 [dependency-groups]
-# matplotlib backs the chart in scripts/test_report.py; the rest are dev-only tools.
+# matplotlib is optional: Chart.from_matplotlib is tested only when it imports,
+# so it stays in the dev group to keep that path exercised rather than skipped.
 # The self-dependency pulls the mlflow extra so `uv sync --group dev` is enough to
 # run every test, rather than every contributor rediscovering which --extra they
 # were missing.
@@ -44,7 +45,6 @@ lint.select = ["F", "E9", "B"]
 # trusting. If dead code ever returns it gets deleted or fixed, not excluded.
 
 [tool.pytest.ini_options]
-# scripts/ holds runnable demos named test_*.py; collection would import them.
 testpaths = ["tests"]
 
 [build-system]
