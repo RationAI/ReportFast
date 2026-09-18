@@ -30,7 +30,7 @@ from ..core import BaseComponent, ComponentRegistry
 from ..session import XopatSession, as_session
 from ..xopat import XopatEndpoint
 
-__all__ = ["SlideCard", "SlideGrid", "xOpatViewer"]
+__all__ = ["SlideCard", "SlideGrid"]
 
 
 class SlideCard(BaseComponent):
@@ -313,28 +313,6 @@ def _heading(text: str) -> FT:
     from fasthtml.common import H2
 
     return H2(text)
-
-
-class xOpatViewer(SlideCard):
-    """Deprecated name for :class:`SlideCard`."""
-
-    component_type = "xopat-viewer"
-
-    def __init__(
-        self,
-        source: Any = None,
-        session: Any = None,
-        **kwargs,
-    ) -> None:
-        import warnings
-
-        warnings.warn(
-            "xOpatViewer is now SlideCard and takes a session; the source= form "
-            "still works but new code should build the session itself.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        super().__init__(source if source is not None else session, **kwargs)
 
 
 ComponentRegistry.register("slide-card", SlideCard)

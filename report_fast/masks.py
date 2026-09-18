@@ -6,11 +6,14 @@ here — ``Mask`` is the layer, :class:`Drive` and :class:`MlflowRun` are the tw
 places its files come from, and :func:`sessions_from_masks` pairs them with
 slides and builds one :class:`~report_fast.session.XopatSession` per case.
 
-    from report_fast import Drive, Mask, MlflowRun, build_report
+::
 
-    report = build_report(
-        background=Drive("/mnt/data/colon/dysplasia"),
-        masks=[
+    from report_fast import Drive, Mask, MlflowRun, Report, SlideGrid
+    from report_fast import sessions_from_masks
+
+    sessions = sessions_from_masks(
+        Drive("/mnt/data/colon/dysplasia"),
+        [
             Mask("Tissue", MlflowRun("97084241311949189445f864d42e9d4e", "tissue_masks"),
                  color="#ffff00", opacity=0.5),
             Mask("Grades", MlflowRun("41d5e1d7d43641ea8f645f9b7945e9f7", "annot_masks"),
@@ -20,10 +23,20 @@ slides and builds one :class:`~report_fast.session.XopatSession` per case.
         only=["1094_18_HE_0", "8625_13_HE_A"],  # the cases, in report order
         min_layers=3,
     )
+    Report(title="QC", blocks=[SlideGrid(sessions=sessions)]).write("report.html")
 
 Nothing is read or downloaded. A mask becomes the DataID the tile server
 resolves; files are matched to slides by stem, so ``case_001.svs`` and
 ``case_001.tiff`` are the same case — the rule the original tool used.
+
+Three behaviours here are the reason this module exists rather than being a loop
+in the report script. ``only`` is the cohort, in report order, taken from a
+listing rather than guessed. A mask that matched **no** case at all raises — a
+source nobody hits is a mistyped run id or artifact directory, and the alternative
+is a report with a silently empty column that still looks finished. ``min_layers``
+then drops the cases that matched *some* masks but too few, recording them in
+``dropped`` so the report can say what it filtered: a slide with one of three
+overlays is either a real gap or a wrong source, and only the caller knows which.
 """
 
 from __future__ import annotations

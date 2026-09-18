@@ -21,13 +21,12 @@ reportfast = "report_fast.__main__:main"
 mlflow = ["mlflow>=2.8,<3"]
 
 [dependency-groups]
-# matplotlib is optional: Chart.from_matplotlib is tested only when it imports,
-# so it stays in the dev group to keep that path exercised rather than skipped.
 # The self-dependency pulls the mlflow extra so `uv sync --group dev` is enough to
 # run every test, rather than every contributor rediscovering which --extra they
-# were missing.
+# were missing. matplotlib is gone with the chart component it was pulled for; an
+# agent that wants a plot has no component for it, which is the ruling, not an
+# omission.
 dev = [
-    "matplotlib>=3.7",
     "pytest>=8.0",
     "ruff>=0.6",
     "report-fast[mlflow]",

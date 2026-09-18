@@ -1,34 +1,31 @@
-"""Components that come with the tool.
+"""The components a report is made of: one slide, or a grid of them.
 
-Each one renders one kind of thing and takes plain data or sessions -- none of
-them knows about a database, a server or a slide-reading library. Compose them
-into a ``Report``, or write your own ``BaseComponent`` beside them.
+Two components, and that is the set. ``SlideCard`` renders one session and
+``SlideGrid`` renders any number of them; ``Report`` and ``Section`` are the page
+they sit on, defined in :mod:`report_fast.core` and re-exported here so every
+component name can be imported from one place. The dependency points this way --
+``core`` defines the page and the components import ``core`` -- so they are not
+moved into ``core``, only reachable through it.
 
-``Report`` and ``Section`` live in :mod:`report_fast.core` and are re-exported
-here so that every name in the frozen set can be imported from the one place a
-reader looks. They are not moved: ``core`` defines the page and the components
-import ``core``, so the dependency points this way and a move would invert it.
-The trial run reached for ``components.Section`` and found nothing, which is the
-whole argument -- the two spellings should not be a thing you have to know.
+There deliberately used to be ten: prose, headings, bullets, link lists, a
+metrics table, a chart, and a raw-HTML escape hatch. They went because a report
+the agent writes in March and one it writes in September have to look like the
+same report, and every component someone can reach for is a way for the two to
+drift apart. What the page needs beyond slides it now carries itself -- a
+subtitle and a preamble on :class:`~report_fast.core.Report`.
+
+Nothing stops a report from having a component of its own: subclass
+:class:`~report_fast.core.BaseComponent`, give it a class prefix that is not
+``rf-``, and add it. That is the documented way to extend the page; the removed
+raw-HTML block was not, because it let anything through.
 """
 
 from ..core import Report, Section
-from .chart import Chart
-from .metrics import MetricTable
-from .prose import Bullets, Heading, LinkList, Prose, RawHtml
-from .slide_grid import SlideCard, SlideGrid, xOpatViewer
+from .slide_grid import SlideCard, SlideGrid
 
 __all__ = [
-    "Bullets",
-    "Chart",
-    "Heading",
-    "LinkList",
-    "MetricTable",
-    "Prose",
-    "RawHtml",
     "Report",
     "Section",
     "SlideCard",
     "SlideGrid",
-    "xOpatViewer",
 ]

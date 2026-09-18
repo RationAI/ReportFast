@@ -20,11 +20,17 @@ Writing your own component is a subclass with two methods::
         def render(self):
             return P(self.text, cls="rf-finding", id=self.id)
 
-add it to a report with ``report.add(Finding(text="..."))`` -- or ignore this
-package's components entirely and append your own FT trees with
-``RawHtml(...)``. Give your classes a prefix of their own: ``rf-card``,
-``rf-note``, ``rf-meta`` and friends are already styled by the components here,
-and every stylesheet in the report lands on the same page.
+add it to a report with ``report.add(Finding(text="..."))``. Give your classes a
+prefix of their own: ``rf-card``, ``rf-note``, ``rf-meta`` and friends are already
+styled by the components here, and every stylesheet in the report lands on the
+same page.
+
+A report carries two pieces of text of its own -- ``subtitle``, and ``preamble``,
+a paragraph above every block. Those are the whole of the prose a page gets;
+everything else on it is a component. That is deliberate: a report the agent
+writes in March and a report it writes in September have to look like the same
+report, and the only way to guarantee that is for the page to be made of parts
+rather than of markup.
 """
 
 from __future__ import annotations
@@ -160,6 +166,11 @@ body {
 .rf-main { max-width: 1400px; margin: 0 auto; padding: 32px 24px 64px; }
 .rf-title { font-size: 1.9rem; margin: 0 0 4px; letter-spacing: -0.01em; }
 .rf-subtitle { color: var(--rf-muted); margin: 0 0 28px; }
+/* The one paragraph a page holds of its own. Max-width, not the grid's full
+   width: a line of prose across 1400px is unreadable, and this is the only text
+   a reader has to read rather than look at. */
+.rf-preamble { margin: -12px 0 28px; max-width: 72ch; color: var(--rf-fg); }
+.rf-subtitle + .rf-preamble { margin-top: -12px; }
 .rf-block { margin: 0 0 28px; }
 .rf-card {
   border: 1px solid var(--rf-line);
@@ -186,12 +197,15 @@ tbody tr:last-child td { border-bottom: none; }
 class Report:
     """An ordered list of components plus the page they render into.
 
-    >>> report = Report(title="QC", blocks=[Prose(text="Hello")])
+    >>> report = Report(title="QC", preamble="Overlays are the model's.")
     >>> report.write("report_output.html")          # doctest: +SKIP
     """
 
     title: str = "Untitled Report"
     subtitle: str = ""
+    #: A paragraph above every block: what to look at, what the overlays are.
+    #: The only prose the page holds besides the title and the subtitle.
+    preamble: str = ""
     blocks: List[BaseComponent] = field(default_factory=list)
     #: "light", "dark" or "auto" (follow the reader's system setting).
     theme: str = "auto"
@@ -241,6 +255,8 @@ class Report:
         head = [H1(self.title, cls="rf-title")]
         if self.subtitle:
             head.append(P(self.subtitle, cls="rf-subtitle"))
+        if self.preamble:
+            head.append(P(self.preamble, cls="rf-preamble"))
         rendered = []
         for block in self.blocks:
             try:

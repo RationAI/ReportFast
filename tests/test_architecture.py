@@ -147,10 +147,68 @@ def test_no_module_is_named_for_a_format_that_no_longer_exists():
         "verify.py",
         "frozen.py",
         "shader.py",
-        "chart.py",
+        "components/chart.py",
+        "components/prose.py",
+        "components/metrics.py",
     )
     present = sorted(name for name in gone if (PACKAGE / name).exists())
     assert not present, f"{present} were deleted on purpose"
+
+
+def test_the_component_set_is_the_two_it_is_supposed_to_be():
+    """Two components, because a page made of more than two can drift.
+
+    The set was ten. Each one was a way for a report written in March and one
+    written in September to look like different products, and each was reachable
+    by an agent that had a slightly different idea about what a caption needed.
+    What the page needs beyond slides it carries itself: `Report`'s subtitle and
+    preamble.
+
+    This asserts the exported set, not the files on disk, because the promise is
+    about what someone can `import`. A third component is not forbidden forever,
+    but it has to arrive here knowingly.
+    """
+    import report_fast
+
+    # `BaseComponent` is the interface, not a thing anyone renders; `Section` is
+    # page furniture beside `Report` -- it groups blocks and shows a title, and
+    # offers no way to say content, so it cannot be a second vocabulary.
+    structural = {"BaseComponent", "Section"}
+    components = {
+        name
+        for name in report_fast.__all__
+        if getattr(getattr(report_fast, name), "component_type", None) is not None
+        and name not in structural
+    }
+    assert components == {"SlideCard", "SlideGrid"}, (
+        f"the exported components are {sorted(components)}; if that is right, "
+        "say why here -- a component is a way for two reports to stop looking "
+        "like the same report"
+    )
+
+
+def test_no_public_name_escapes_html():
+    """Nothing in the public surface takes markup and passes it through.
+
+    `RawHtml` was that door and it went with the rest: the component set is what
+    makes reports consistent, and one block that accepts arbitrary markup makes
+    the set advisory. `Report.add` still takes a FastHTML tree, which is the
+    documented extension path and is listed as an accepted exception rather than
+    quietly left out -- see `test_a_raw_fasthtml_can_be_a_block` in
+    test_components.py, which is where that path is pinned.
+    """
+    import inspect
+
+    import report_fast
+
+    for name in report_fast.__all__:
+        owner = getattr(report_fast, name)
+        if not inspect.isclass(owner):
+            continue
+        signature = str(inspect.signature(owner.__init__))
+        assert "html" not in signature.replace("html5", ""), (
+            f"{name} takes markup named 'html'"
+        )
 
 
 def test_the_package_imports_without_the_optional_extras():

@@ -5,25 +5,20 @@ Run: .venv/bin/python tests/test_components.py
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 import sys
 import tempfile
 import urllib.parse
-import warnings
 from html import unescape
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fasthtml.common import Div, to_xml  # noqa: E402
+from fasthtml.common import Div, P, to_xml  # noqa: E402
 
 from report_fast import (  # noqa: E402
-    Chart,
-    MetricTable,
-    Prose,
-    RawHtml,
+    BaseComponent,
     Report,
     Section,
     SlideCard,
@@ -31,7 +26,30 @@ from report_fast import (  # noqa: E402
     XopatEndpoint,
     XopatSession,
 )
-from report_fast.components.slide_grid import xOpatViewer  # noqa: E402
+
+
+class Text(BaseComponent):
+    """A block of text, for tests that need a second kind of component.
+
+    The library ships two components and neither is prose, so a test of the
+    *report* -- stylesheets gathered from every block, a block that raises, ids
+    across a page -- needs a block of its own. Writing one here is also the
+    documented way to extend a page, so these tests exercise that path rather
+    than only the components that came with the package.
+    """
+
+    component_type = "test-text"
+
+    def __init__(self, text: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.text = text
+
+    def css(self) -> str:
+        return ".rf-test-text { color: var(--rf-muted); }"
+
+    def render(self):
+        return P(self.text, cls="rf-test-text", id=self.id)
+
 
 BASE = "https://xopat.example/v3/"
 WSI = "https://wsi.example/v3.0"
@@ -65,7 +83,7 @@ def decode(url: str) -> dict:
 
 
 def test_report_owns_the_document_and_inlines_every_stylesheet():
-    report = Report(title="QC", blocks=[Prose(text="hello"), SlideCard(session())])
+    report = Report(title="QC", blocks=[Text("hello"), SlideCard(session())])
     html = report.to_html()
     assert html.lstrip().startswith("<!doctype html>")
     assert "<script" not in html, "the report is static; xOpat is the interactive part"
@@ -85,6 +103,41 @@ def test_a_container_contributes_its_children_stylesheet():
     assert ".rf-slide-card" in nested.collect_css()
 
 
+def test_the_page_holds_two_pieces_of_prose_and_no_more():
+    """`subtitle` and `preamble`, escaped, above every block.
+
+    This is the whole prose budget of a page -- the replacement for the Prose and
+    Heading components. It matters that the test is about the *budget*: a report
+    whose text could be arbitrary markup is a report whose layout can drift,
+    which is why the components went. Escaping is asserted in the same place
+    because the argument for keeping the budget small is the argument for it not
+    being a door.
+    """
+    report = Report(
+        title="QC",
+        subtitle="32 cases",
+        preamble="Overlays are the model's; <script>alert(1)</script> is not.",
+        blocks=[SlideCard(session())],
+    )
+    html = report.to_html()
+    assert "32 cases" in html and "Overlays are the model" in html
+    assert "class=\"rf-preamble\"" in html
+    assert ".rf-preamble {" in report.collect_css()
+    assert "<script" not in html, "page prose is text, escaped like every block"
+    assert "&lt;script&gt;" in html, "escaped rather than dropped -- the reader sees it"
+    # Above the blocks, not between them: one paragraph about the whole report.
+    # Both class *attributes*, because both names also occur in the inlined
+    # stylesheet, and comparing positions inside <style> proves nothing about
+    # the order anything renders in.
+    assert html.index('class="rf-preamble"') < html.index('class="rf-card rf-slide-card"')
+    # And with neither set, neither renders: an empty paragraph is not layout.
+    # Checked as a class *attribute* -- BASE_CSS names both selectors whether or
+    # not the page uses them, so a bare substring search proves nothing.
+    bare = Report(title="QC", blocks=[SlideCard(session())]).to_html()
+    assert "class=\"rf-preamble\"" not in bare
+    assert "class=\"rf-subtitle\"" not in bare
+
+
 def test_report_writes_one_self_contained_file():
     report = Report(title="QC", blocks=[SlideCard(session())])
     with tempfile.TemporaryDirectory() as tmp:
@@ -96,11 +149,11 @@ def test_report_writes_one_self_contained_file():
 
 
 def test_report_survives_a_block_that_raises():
-    class Broken(Prose):
+    class Broken(Text):
         def render(self):
             raise RuntimeError("bad mask")
 
-    html = Report(title="QC", blocks=[Broken(), Prose(text="still here")]).to_html()
+    html = Report(title="QC", blocks=[Broken("broken"), Text("still here")]).to_html()
     assert "bad mask" in html
     assert "still here" in html, "one broken block must not lose the report"
 
@@ -116,7 +169,7 @@ def test_raw_fasthtml_can_be_a_block():
 
 
 def test_section_groups_blocks_and_collapses_without_javascript():
-    section = Section("Slides", [Prose(text="a"), Prose(text="b")], collapsible=True)
+    section = Section("Slides", [Text("a"), Text("b")], collapsible=True)
     html = to_xml(section.render())
     assert "<details" in html and "<summary>Slides</summary>" in html
     assert "<script" not in html
@@ -266,17 +319,6 @@ def test_card_embeds_the_viewer_when_asked():
     assert f'src="{BASE}#%7B' in html
 
 
-def test_legacy_viewer_name_still_builds_a_card():
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        viewer = xOpatViewer(source=SLIDE, endpoint=endpoint())
-    assert isinstance(viewer, SlideCard)
-    assert any("SlideCard" in str(entry.message) for entry in caught)
-
-
-# ── grid ────────────────────────────────────────────────────────────────────
-
-
 def test_no_element_id_appears_twice_in_a_page():
     """Every id on a page names one element.
 
@@ -293,8 +335,8 @@ def test_no_element_id_appears_twice_in_a_page():
         title="ids",
         blocks=[
             SlideGrid([session()], endpoint=endpoint(), title="slides"),
-            Prose("prose"),
-            Section(title="section", blocks=[Prose("nested"), Prose("also nested")]),
+            Text("prose"),
+            Section(title="section", blocks=[Text("nested"), Text("also nested")]),
         ],
     )
     html = report.to_html()
@@ -359,58 +401,6 @@ def test_grid_add_is_fluent_and_keeps_the_defaults():
 def test_grid_collapses_the_whole_set():
     html = to_xml(SlideGrid([session()], title="Slides", collapsible=True).render())
     assert "<details" in html and "<summary>Slides</summary>" in html
-
-
-# ── data components ─────────────────────────────────────────────────────────
-
-
-def test_metric_table_accepts_pairs_dicts_and_records():
-    assert "0.91" in to_xml(MetricTable({"auc": 0.9123}).render())
-    by_slide = MetricTable({"a": {"auc": 0.9}, "b": {"auc": 0.8}}).render()
-    html = to_xml(by_slide)
-    assert "<th></th>" in html and "<th>auc</th>" in html and ">a<" in html
-    records = to_xml(MetricTable([{"slide": "a", "auc": 0.9}]).render())
-    assert "<th>slide</th>" in records and "<th>auc</th>" in records
-
-
-def test_metric_table_formats_values_without_losing_meaning():
-    html = to_xml(
-        MetricTable({"on": True, "off": False, "none": None, "n": 12}).render()
-    )
-    assert ">yes<" in html and ">no<" in html and "—" in html and ">12<" in html
-
-
-def test_chart_embeds_bytes_and_files():
-    inline = Chart(b"png-bytes")
-    assert inline.src.startswith("data:image/png;base64,")
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "chart.png"
-        path.write_bytes(b"png-bytes")
-        assert Chart(path).src == inline.src
-        assert Chart(path, external=True).src == str(path)
-    html = to_xml(Chart(b"x", caption="_auc_").render())
-    assert "<figure" in html and "_auc_" in html
-
-
-def test_chart_from_matplotlib_does_not_touch_a_file():
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-    except ImportError:
-        return
-    figure = plt.figure()
-    plt.plot([0, 1], [0, 1])
-    chart = Chart.from_matplotlib(figure, caption="trend")
-    plt.close(figure)
-    assert chart.src.startswith("data:image/png;base64,")
-    assert len(base64.b64decode(chart.src.split(",", 1)[1])) > 500
-
-
-def test_raw_html_passes_through():
-    html = to_xml(RawHtml(html="<custom-widget a='1'>hi</custom-widget>").render())
-    assert "<custom-widget a='1'>hi</custom-widget>" in html
 
 
 def main() -> int:

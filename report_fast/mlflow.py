@@ -11,23 +11,28 @@ mlflow is optional and imported lazily: everything here works against any
 object with the client's methods (pass `client=`), and only the default
 constructor needs the package installed::
 
-    from report_fast import build_report
-    from report_fast.mlflow import Mlflow
+    from report_fast import Mlflow, MlflowRun, Mask, Report, SlideGrid
+    from report_fast import sessions_from_masks
 
     flow = Mlflow(tracking_uri="http://mlflow.rationai-mlflow:5000/")
     run = "5b72e2a73b3941f0be63e232d8072127"
 
-    report = build_report(
-        title="Dysplasia report",
-        slides=flow.slides(run, "tile_masks"),
-        masks=flow.masks(run, "tile_masks/test_preliminary/HG Dysplasia"),
-        metrics=flow.metrics(run),
+    sessions = sessions_from_masks(
+        flow.slides(run, "tile_masks"),
+        [Mask("HG", MlflowRun(run, "tile_masks/test_preliminary/HG Dysplasia"))],
+        flow=flow,
     )
+    report = Report(
+        title="Dysplasia report",
+        blocks=[SlideGrid(sessions=sessions)],
+    )
+    report.write("report.html")
     published = flow.publish(report, run_id=run)
     print(published.url)
 
-`slides()`/`masks()`/`metrics()` only read. `publish()` writes to the tracking
-store, which is why it is never implicit.
+`slides()` and `masks()` only read. `publish()` writes to the tracking store,
+which is why it is never implicit: no argument implies it, and it is the only
+name in this package that uploads.
 """
 
 from __future__ import annotations
@@ -263,7 +268,7 @@ class Mlflow:
         return dict(self._run(run_id).data.tags or {})
 
     def metrics(self, run_id: str) -> Dict[str, float]:
-        """The run's latest metrics, in the shape `MetricTable` takes."""
+        """The run's latest metrics, as a plain dict of name -> value."""
         return dict(self._run(run_id).data.metrics or {})
 
     def link(self, run_id: str, experiment_id: Optional[Union[str, int]] = None) -> str:

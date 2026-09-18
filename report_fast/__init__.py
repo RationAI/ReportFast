@@ -42,17 +42,7 @@ that `data[]` indices are minted by :meth:`XopatSession.add_data` rather than
 typed.
 """
 
-from .components import (
-    Bullets,
-    Chart,
-    Heading,
-    LinkList,
-    MetricTable,
-    Prose,
-    RawHtml,
-    SlideCard,
-    SlideGrid,
-)
+from .components import SlideCard, SlideGrid
 from .config import BUILTIN_PRESET, SessionPreset, load_preset, parse_preset
 from .core import BASE_CSS, BaseComponent, ComponentRegistry, Report, Section
 from .layer import colormap_layer, heatmap_layer
@@ -101,14 +91,7 @@ __all__ = [
     "BaseComponent",
     "ComponentRegistry",
     "BASE_CSS",
-    # components
-    "Bullets",
-    "Chart",
-    "Heading",
-    "LinkList",
-    "MetricTable",
-    "Prose",
-    "RawHtml",
+    # components -- the whole set
     "SlideCard",
     "SlideGrid",
     # layer specs -- the only place a shader type name is written
