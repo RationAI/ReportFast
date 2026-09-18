@@ -2463,13 +2463,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-all = [
-    { name = "mlflow" },
-    { name = "pyyaml" },
-]
-manifest = [
-    { name = "pyyaml" },
-]
 mlflow = [
     { name = "mlflow" },
 ]
@@ -2479,7 +2472,7 @@ dev = [
     { name = "matplotlib", version = "3.10.9", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "matplotlib", version = "3.11.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "pytest" },
-    { name = "report-fast", extra = ["all"] },
+    { name = "report-fast", extra = ["mlflow"] },
     { name = "ruff" },
 ]
 
@@ -2487,16 +2480,14 @@ dev = [
 requires-dist = [
     { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=2.8,<3" },
     { name = "python-fasthtml", specifier = ">=0.5.0" },
-    { name = "pyyaml", marker = "extra == 'manifest'", specifier = ">=6" },
-    { name = "report-fast", extras = ["manifest", "mlflow"], marker = "extra == 'all'" },
 ]
-provides-extras = ["manifest", "mlflow", "all"]
+provides-extras = ["mlflow"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "matplotlib", specifier = ">=3.7" },
     { name = "pytest", specifier = ">=8.0" },
-    { name = "report-fast", extras = ["all"] },
+    { name = "report-fast", extras = ["mlflow"] },
     { name = "ruff", specifier = ">=0.6" },
 ]
 

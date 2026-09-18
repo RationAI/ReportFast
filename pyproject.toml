@@ -9,35 +9,27 @@ dependencies = [
 ]
 
 [project.scripts]
-# `reportfast plan|build|find`. main() returns the exit code and the generated
-# wrapper passes it to sys.exit, so the codes in report_fast/__main__.py are the
-# ones CI sees.
+# `reportfast skill`. main() returns the exit code and the generated wrapper passes
+# it to sys.exit, so the codes in report_fast/__main__.py are the ones CI sees.
 reportfast = "report_fast.__main__:main"
 
 [project.optional-dependencies]
-# Manifest mode -- YAML in, report out. Kept out of the base install for the
-# same reason mlflow is: `import report_fast` and every Python entry point work
-# without it, and manifest.py says which `uv sync` to run when it is asked for
-# and absent.
-manifest = ["pyyaml>=6"]
 # Only report_fast.mlflow talks to the tracking API; import it and the rest of
 # the package keeps working without this. Capped below 3 because the deployment
 # runs a 2.x tracking server: a 3.x client calls endpoints it does not have
 # (listing artifacts 404s on /mlflow/logged-models/search).
 mlflow = ["mlflow>=2.8,<3"]
-# The whole CLI. `uv sync --extra all` is what the skill's scripts assume.
-all = ["report-fast[manifest,mlflow]"]
 
 [dependency-groups]
 # matplotlib backs the chart in scripts/test_report.py; the rest are dev-only tools.
-# The self-dependency pulls both extras so `uv sync --group dev` is enough to run
-# the manifest tests and the CLI, rather than every contributor rediscovering
-# which --extra they were missing.
+# The self-dependency pulls the mlflow extra so `uv sync --group dev` is enough to
+# run every test, rather than every contributor rediscovering which --extra they
+# were missing.
 dev = [
     "matplotlib>=3.7",
     "pytest>=8.0",
     "ruff>=0.6",
-    "report-fast[all]",
+    "report-fast[mlflow]",
 ]
 
 [tool.ruff]

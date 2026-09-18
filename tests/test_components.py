@@ -26,12 +26,10 @@ from report_fast import (  # noqa: E402
     RawHtml,
     Report,
     Section,
-    SessionTemplate,
     SlideCard,
     SlideGrid,
     XopatEndpoint,
     XopatSession,
-    build_report,
 )
 from report_fast.components.slide_grid import xOpatViewer  # noqa: E402
 
@@ -413,64 +411,6 @@ def test_chart_from_matplotlib_does_not_touch_a_file():
 def test_raw_html_passes_through():
     html = to_xml(RawHtml(html="<custom-widget a='1'>hi</custom-widget>").render())
     assert "<custom-widget a='1'>hi</custom-widget>" in html
-
-
-# ── out of the box ──────────────────────────────────────────────────────────
-
-
-def test_build_report_from_paths_alone():
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "report.html"
-        report = build_report(
-            ["/data/slides/a.tif", "/data/slides/b.tif"],
-            masks=["/data/masks/a.tif"],
-            title="QC",
-            intro="Two slides.",
-            metrics={"slides": 2},
-            out=out,
-        )
-        html = out.read_text(encoding="utf-8")
-        assert "QC" in html and "Two slides." in html
-        assert html.count('class="rf-card rf-slide-card"') == 2
-        assert len(report.blocks) == 3  # prose, grid, metrics
-
-
-def test_build_report_scans_a_folder_and_takes_a_template():
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp)
-        (root / "slides").mkdir()
-        (root / "slides" / "a.tif").touch()
-        (root / "slides" / "b.tif").touch()
-        template = SessionTemplate.from_config(
-            {
-                "data": ["placeholder.tif", "mask.tif"],
-                "background": [{"dataReference": 0, "visualizationIndex": 0}],
-                "visualizations": [
-                    {"shaders": {"l": {"type": "heatmap", "dataReferences": [1]}}}
-                ],
-            },
-            slots={0: "slide"},
-            endpoint=endpoint(),
-        )
-        report = build_report(
-            directory=root / "slides", template=template, endpoint=endpoint()
-        )
-        html = report.to_html()
-        assert "thumbnail/max_size" in html
-        first = [card.session.data_ids[0] for card in report.blocks[0].cards]
-        assert [Path(data_id).name for data_id in first] == ["a.tif", "b.tif"]
-
-
-def test_build_report_can_collapse_the_grid():
-    report = build_report(
-        ["/data/s.tif"], grid={"collapsible": True, "title": "Slides"}
-    )
-    assert "<details" in report.to_html()
-
-
-def test_build_report_appends_custom_blocks():
-    report = build_report(["/data/s.tif"], blocks=[Prose(text="written by the user")])
-    assert "written by the user" in report.to_html()
 
 
 def main() -> int:

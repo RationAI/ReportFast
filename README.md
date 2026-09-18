@@ -389,3 +389,4 @@ uv run python tests/test_cli.py   # each file is also a standalone script
 installed, and has no publish step. Two properties are asserted rather than assumed:
 output is byte-identical for the same inputs, and publishing never happens as a side
 effect.
+

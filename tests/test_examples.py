@@ -1,22 +1,18 @@
-"""The examples in the package docstring are executed, not reread.
+"""The examples in the package docstring are executed, not merely read.
 
-The flagship snippet in `report_fast/__init__.py` had been wrong in three ways at
-once -- swapped positional arguments, a `.build()` call on a list, and a design
-that never reached the sidecar -- and nothing failed, because the blocks are `::`
-examples, not doctests, so no runner ever saw them. A corrected copy in a test
-would rot the same way the docstring did. So this file *parses the docstring
-itself*, pulls out every indented example block, and runs it. When the prose
-changes, the code that runs is the changed code, and a snippet that stops working
-stops the suite.
+A docstring snippet rots in ways no other test sees: a name stops being exported,
+an argument swaps order, a method moves to another object. None of that fails a
+test, because nothing else in the suite reads the docstring -- so this file does,
+and runs what it finds.
 
-Run:      cd /home/jovyan/report_fast && python tests/test_examples.py
-Pytest:   pytest tests/test_examples.py
+No network here. A report example is a few lines of Python that touch no server
+(a session is a DataID string, a thumbnail is a URL, nothing opens either), so
+unlike the old build-command examples there is nothing to stub: the tile server
+is never called, and a test on a train behaves as it does on the cluster.
 """
 
 from __future__ import annotations
 
-import contextlib
-import json
 import os
 import re
 import sys
@@ -28,28 +24,6 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import report_fast  # noqa: E402
-from report_fast import verify  # noqa: E402
-from report_fast.skill import examples_dir  # noqa: E402
-
-
-@contextlib.contextmanager
-def no_image_server():
-    """Empty the DataID probe for the duration of one example.
-
-    The documented example builds with `check` at its default, which asks the tile
-    server whether it can open every DataID -- half a minute of network per
-    example on a good day, and a failure on a train. What is under test is that the
-    snippet runs and leaves a page behind, not whether the deployment is up. The
-    probe itself is covered by `tests/test_verify.py`; `compose.build` imports it
-    by name inside `build`, so patching the module attribute is what the call
-    sees.
-    """
-    real = verify.probe
-    verify.probe = lambda *a, **k: []
-    try:
-        yield
-    finally:
-        verify.probe = real
 
 
 def example_blocks(documented: str) -> list:
@@ -82,45 +56,31 @@ def example_blocks(documented: str) -> list:
 
 def blocks() -> list:
     made = example_blocks(report_fast.__doc__)
-    assert len(made) >= 3, "the package docstring lost its examples"
+    assert len(made) >= 2, "the package docstring lost its examples"
     return made
 
 
 def run_block(block: str, directory: Path) -> dict:
     """Execute one example block inside `directory`, returning its namespace.
 
-    `cases` is supplied rather than authored by the block because a case list is
-    data -- 300 rows a real caller reads off a drive -- and the example is about
-    the chain, not about inventing slides. The slots match the docstring's own
-    `{0: "slide", 1: "mask"}`, filled with the design's existing DataIDs so every
-    binding stays inside the gate.
-
-    The design on disk is the shipped example session, not an invented one: the
-    gate refuses a hand-waved session, so a fabricated fixture would have the test
-    fighting the very validation the example depends on.
+    The working directory is switched rather than the snippet rewritten, so what
+    runs is the text a reader copies: an example that only works from the repo
+    root is an example that fails in someone's project.
     """
-    source = json.loads((examples_dir() / "dysplasia_case.json").read_text())
-    (directory / "design.json").write_text(json.dumps(source))
-    ids = [entry["dataID"] for entry in source["data"]]
-    cases = [
-        {"slide": ids[0], "mask": ids[1], "name": f"case_{letter}"}
-        for letter in ("a", "b")
-    ]
     previous = os.getcwd()
     os.chdir(directory)
     try:
-        namespace = {"cases": cases}
-        with no_image_server():
-            exec(compile(block, "<docstring example>", "exec"), namespace)
+        namespace: dict = {}
+        exec(compile(block, "<docstring example>", "exec"), namespace)
         return namespace
     finally:
         os.chdir(previous)
 
 
-def in_dir(made):
-    """Run one test body in a fresh directory, for the standalone runner below."""
+def in_dir(body):
+    """Run one test body in a fresh directory."""
     with tempfile.TemporaryDirectory() as scratch:
-        return made(Path(scratch))
+        return body(Path(scratch))
 
 
 def test_every_block_compiles():
@@ -131,8 +91,7 @@ def test_every_block_compiles():
 def test_every_block_runs():
     # The whole point of executing the prose instead of copying it: a snippet that
     # raises -- swapped arguments, a method call on the wrong type, a name that was
-    # never exported -- fails here and nowhere else, because nothing else in the
-    # suite reads the docstring.
+    # never exported -- fails here and nowhere else.
     for block in blocks():
         with tempfile.TemporaryDirectory() as scratch:
             run_block(block, Path(scratch))
@@ -151,68 +110,55 @@ def test_the_first_example_renders_a_card():
     return in_dir(body)
 
 
-def test_the_design_example_builds_a_page():
-    block = next(b for b in blocks() if "load_design" in b)
+def test_the_second_example_writes_a_page():
+    """The loop-and-write example is what an agent copies, so it must run.
+
+    It globs a mount that is not present on a dev machine, which is the honest
+    shape of the snippet: an empty folder yields a page with no cards rather than
+    an error, and that is worth knowing -- the failure someone meets when the
+    mount is not attached is a thin report, not a traceback.
+    """
+    block = next(b for b in blocks() if ".write(" in b)
 
     def body(directory):
         run_block(block, directory)
         page = directory / "report.html"
         assert page.exists(), "the example never wrote its page"
-        assert "rf-slide-card" in page.read_text(), "the page has no cards"
+        written = page.read_text()
+        assert written.lower().startswith("<!doctype html>"), "the page has no doctype"
+        assert "rf-main" in written, "the page is not the report shell"
+        assert "<script" not in written, "the page is no longer JavaScript-free"
 
     return in_dir(body)
 
 
-def test_the_design_example_records_the_design():
-    # The third defect the docstring carried: a design bound, `design: null` in
-    # the record. The example is the answer users copy, so the example is where
-    # the recording has to be visible.
-    block = next(b for b in blocks() if "load_design" in b)
-
-    def body(directory):
-        run_block(block, directory)
-        record = json.loads((directory / "report.provenance.json").read_text())
-        assert record["design"] is not None, "the example leaves design: null"
-        assert record["design"]["slots"] == {"0": "slide", "1": "mask"}
-        assert "data" in record["design"]["session"]
-
-    return in_dir(body)
-
-
-def test_the_expand_example_returns_sessions():
-    block = next(b for b in blocks() if re.search(r"^\s*sessions = expand\(", b, re.M))
-
-    def body(directory):
-        made = run_block(block, directory)
-        sessions = made["sessions"]
-        assert isinstance(sessions, list), "expand() stopped returning sessions"
-        assert len(sessions) == 2
-        # The docstring says plainly that this is a list and not a page; the day it
-        # returns something with `.build()` is a ruling, and this fails then.
-        assert not hasattr(sessions, "build")
-
-    return in_dir(body)
+def test_every_named_name_is_public():
+    # Any report_fast name the docstring spells out has to be exported. `design_of`
+    # was once written, tested and documented and still was not in `__all__`, which
+    # made the documented outcome unreachable from the public surface. Scanned over
+    # the whole docstring rather than only the `::` blocks: prose that names
+    # :func:`sessions_from_masks` is a promise to the same extent as a snippet.
+    documented = report_fast.__doc__ or ""
+    named = set(re.findall(r":(?:class|func|meth|mod):`([A-Za-z_][\w.]*)`", documented))
+    named |= set(
+        piece.strip()
+        for found in re.finditer(r"from report_fast import (.+)", documented)
+        for piece in found.group(1).split(",")
+    )
+    # A method named on another object (`XopatSession.add_data`) and a module path
+    # are attributes of something public, not public names themselves.
+    top = {name.split(".")[0] for name in named}
+    assert top, "the docstring stopped naming anything"
+    missing = sorted(top - set(report_fast.__all__))
+    assert not missing, f"the docstring names things that are not exported: {missing}"
 
 
-def test_every_imported_name_is_public():
-    # A name an example imports has to be exported. `design_of` was written,
-    # tested and documented and still was not in `__all__`, which made the
-    # documented outcome unreachable from the public surface.
-    imported = set()
-    for block in blocks():
-        for line in block.splitlines():
-            found = re.match(r"\s*from\s+report_fast\s+import\s+(.+)", line)
-            if found:
-                imported.update(piece.strip() for piece in found.group(1).split(","))
-    assert imported, "the docstring stopped importing anything"
-    missing = sorted(imported - set(report_fast.__all__))
-    assert not missing, f"the docstring imports names that are not exported: {missing}"
-
-
-def test_design_of_is_exported():
-    # The only way a Python-path caller can make `design` non-null.
-    assert hasattr(report_fast, "design_of")
-    assert "design_of" in report_fast.__all__
+def test_the_docstring_stops_promising_a_record():
+    # Nothing is written beside a report any more; the script that built it is the
+    # record. A docstring that mentions a sidecar is the bug this pins against.
+    documented = report_fast.__doc__ or ""
+    for stale in ("provenance", "sidecar", "manifest", "build_report"):
+        assert stale not in documented.lower(), f"the package docstring still says {stale!r}"
 
 
 if __name__ == "__main__":

@@ -14,76 +14,35 @@ no server, no JavaScript, no slide-reading library::
     )
     SlideCard(session).to_html()
 
-For the whole report in one call, see :func:`build_report`. Slides, masks and
-reports that live in an MLflow run go through :class:`Mlflow` -- it turns
-artifacts into the DataIDs the tile server addresses rather than downloading
-anything.
+Slides, masks and reports that live in an MLflow run go through :class:`Mlflow`
+-- it turns artifacts into the DataIDs the tile server addresses rather than
+downloading anything -- and :func:`sessions_from_masks` pairs a folder of masks
+with a folder of slides by filename stem.
 
-The agent path enters through :func:`load_design`: one hand-authored xOpat session
-design, validated once against the viewer's own schema, then bound per case in a
-plain Python loop, then composed into a page (:class:`Composition`). Nothing in
-that chain needs a manifest and nothing it does not ask for is written to disk::
+A report is written by a script, not by a command: the loop over a folder is a
+few lines here, and those lines are the record of the report. Nothing in this
+package writes a file unless it is told where to::
 
-    from report_fast import Composition, SlideGrid, design_of, load_design
+    from pathlib import Path
 
-    template = load_design("design.json", slots={0: "slide", 1: "mask"})
-    sessions = [template.bind(**case) for case in cases]
-    report = Composition(title="QC", blocks=[SlideGrid(sessions=sessions)])
-    report.design = design_of(template)   # so the sidecar names the design
-    report.build(out="report.html")
+    from report_fast import Report, SlideGrid, XopatSession
 
-:func:`expand` is the same loop with the failing case named in the error, for when
-300 bindings and one typo is a search you would rather not do::
+    slides = Path("/mnt/slides")
+    sessions = [
+        XopatSession.from_slide(path, name=path.stem)
+        for path in sorted(slides.glob("*.tif"))
+    ]
+    Report(title="QC", blocks=[SlideGrid(sessions=sessions)]).write("report.html")
 
-    from report_fast import expand
-
-    sessions = expand("design.json", cases, slots={0: "slide", 1: "mask"})
-
-Design it takes first, cases second -- both are positional, so passing them the
-other way round raises `TypeError: got multiple values for argument 'design'`
-rather than building the wrong thing. Either way `expand` returns *sessions*, not
-a page: the `Composition` above is what turns them into one, and it is what
-carries `.build()`.
-
-Setting `report.design` is what puts the design in the sidecar. Nothing sets it
-for you -- a record of an input is only true if the caller that held the input
-wrote it, and by the time a page is being composed the library can no longer know
-which design the sessions came from. A build that never says leaves `design: null`,
-which is the honest answer rather than a bug in the recording.
-
-Every build also writes `report.provenance.json` beside the HTML -- the record of
-what resolved. Nothing is stamped into the page, so a mailed report carries no
-provenance; that is ruled, not an oversight.
-
-:mod:`report_fast.frozen` is the set of components that path may use, and
-:mod:`report_fast.audit` / :mod:`report_fast.contract` are the session gate and
-the viewer facts it is checked against -- exported because a caller auditing its
-own sessions, or pinning which viewer a report was verified against, needs them
-and should not reach into a private module to do it.
+The session JSON itself is authored -- by a person or, normally, by an agent
+reading the viewer's own type definitions. :meth:`XopatSession.from_config` keeps
+every key it is handed, so a field this package has never heard of survives; what
+it does keep for itself is the one structural rule the viewer punishes silently,
+that `data[]` indices are minted by :meth:`XopatSession.add_data` rather than
+typed.
 """
 
 from .audit import Finding, audit, split
-from .build import build_report, sessions_for
-from .compose import (
-    ComposeError,
-    ComposeNotFound,
-    Composition,
-    expand,
-    load_design,
-    load_session,
-    sessions_from_dir,
-    temp_dir_sessions,
-)
-from .contract import viewer_stamp
-from .frozen import CompositionError, FROZEN, authorize, violations
-from .provenance import (
-    Provenance,
-    ProvenanceError,
-    design_of,
-    read as read_provenance,
-    sidecar_path,
-    verify_pair,
-)
 from .components import (
     Bullets,
     Chart,
@@ -145,8 +104,6 @@ __all__ = [
     "BaseComponent",
     "ComponentRegistry",
     "BASE_CSS",
-    "build_report",
-    "sessions_for",
     # components
     "Bullets",
     "Chart",
@@ -172,30 +129,8 @@ __all__ = [
     "MlflowError",
     "Published",
     "artifact_data_id",
-    # the agent path: author, gate, bind, compose
-    "expand",
-    "load_design",
-    "load_session",
-    "sessions_from_dir",
-    "temp_dir_sessions",
-    "Composition",
-    "ComposeError",
-    "ComposeNotFound",
-    # what the agent path is allowed to put on the page
-    "FROZEN",
-    "authorize",
-    "violations",
-    "CompositionError",
-    # the gate and the facts it is gated against
+    # the session gate and the viewer facts it reads
     "audit",
     "split",
     "Finding",
-    "viewer_stamp",
-    # the record every build leaves beside the page
-    "Provenance",
-    "ProvenanceError",
-    "design_of",
-    "read_provenance",
-    "sidecar_path",
-    "verify_pair",
 ]

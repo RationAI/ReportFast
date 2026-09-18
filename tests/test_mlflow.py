@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from report_fast import Report, sessions_for  # noqa: E402
+from report_fast import Report, sessions_from_paths  # noqa: E402
 from report_fast.mlflow import (  # noqa: E402
     Mlflow,
     MlflowError,
@@ -316,9 +316,12 @@ def test_a_store_that_cannot_be_reached_is_reported():
 
 
 def test_run_artifacts_reach_a_session_untouched():
-    made = sessions_for(
-        slides=flow().slides(RUN, "slides"),
-        masks=flow().masks(RUN, "masks", recursive=True),
+    # `sessions_for` is gone with the one-call report; this is the call it made for
+    # a list of paths, spelled out. `Mlflow.masks` returns a per-slide function, so
+    # it goes in `layers_for`, which is where the surviving signature takes one.
+    made = sessions_from_paths(
+        flow().slides(RUN, "slides"),
+        layers_for=flow().masks(RUN, "masks", recursive=True),
     )
     assert len(made) == 2
     config = made[0].to_config()

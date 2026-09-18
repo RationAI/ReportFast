@@ -306,37 +306,5 @@ def test_every_file_the_skill_points_at_exists():
     assert (ROOT / "examples").is_dir()
 
 
-def test_the_skill_teaches_the_gate_not_the_old_prohibition():
-    """The contract change, pinned as prose.
-
-    The old skill said *never write session JSON by hand* and put the manifest at
-    the front of every sentence. Both are now the opposite of the ruling, and a
-    skill that reads like the previous release will be followed like the previous
-    release.
-    """
-    text = SKILL.read_text(encoding="utf-8").lower()
-    assert "never write session json by hand" not in text
-    for taught in ("load_design", "bind(", "frozen set", "raw_html", "--sessions-dir"):
-        assert taught in text, taught
-    # The ten names, because "compose only from the frozen set" is not actionable
-    # as a rule an agent has to go and look up mid-task.
-    from report_fast.frozen import FROZEN
-
-    for name in FROZEN:
-        assert name.lower() in text, f"{name} is frozen but not taught"
-
-
-def test_the_skill_still_carries_the_rules_that_cost_someone_a_report():
-    """The rules are not the contract; they are the scar tissue. Rewriting the
-    skill is not a licence to drop them."""
-    # Matched case-insensitively: the sentence-initial capitals are prose style,
-    # and a rule should not fail a test because someone started it with a capital.
-    text = SKILL.read_text(encoding="utf-8").lower()
-    for rule in ("discover, never guess", "never implied", "probe before claiming",
-                 "never regenerate", "--publish", "show the plan",
-                 "exit codes", "frozen set"):
-        assert rule in text, rule
-
-
 if __name__ == "__main__":
     raise SystemExit(_support.run(globals(), origin="test_contract.py"))

@@ -19,9 +19,9 @@ from report_fast import (  # noqa: E402
     Drive,
     Mask,
     MlflowRun,
+    Report,
+    SlideGrid,
     XopatEndpoint,
-    build_report,
-    sessions_for,
     sessions_from_masks,
 )
 from report_fast.shader import ShaderType  # noqa: E402
@@ -278,45 +278,29 @@ def test_masks_sharing_a_source_are_listed_once():
     assert calls["n"] == 2, f"expected one listing per run, got {calls['n']}"
 
 
-# ── through build_report ────────────────────────────────────────────────────
+# ── the drive folder to a page, the way a script does it ───────────────────
 
 
-def test_build_report_takes_the_config_shape():
+def test_a_drive_and_a_named_mask_reach_the_page():
+    """The end-to-end property `build_report` used to assert, on what survives.
+
+    A folder of slides plus a named mask over it becomes one card per case whose
+    link carries both DataIDs. The assembly that used to prove it lives in the
+    agent's script now, so it is spelled out here -- four lines, which is the
+    argument for the assembly having been a library call in the first place.
+    """
     slides, masks = folder()
-    with tempfile.TemporaryDirectory() as out_dir:
-        report = build_report(
-            background=Drive(slides),
-            masks=[Mask("Tissue", Drive(masks), color="#00ff00")],
-            title="Dysplasia report",
-            out=Path(out_dir) / "report.html",
-            endpoint=ENDPOINT,
-        )
-        html = report.to_html()
+    sessions = sessions_from_masks(
+        background=Drive(slides),
+        masks=[Mask("Tissue", Drive(masks), color="#00ff00")],
+        endpoint=ENDPOINT,
+    )
+    html = Report(
+        title="Dysplasia report",
+        blocks=[SlideGrid(sessions=sessions, title="Slides")],
+    ).to_html()
     assert "viewer.test/v3/#" in html and "case_001" in html
-
-
-def test_background_replaces_slides():
-    slides, masks = folder()
-    try:
-        build_report(
-            slides=[slides / "case_001.tif"],
-            background=Drive(slides),
-            masks=[Mask("Tissue", Drive(masks))],
-            endpoint=ENDPOINT,
-        )
-    except ValueError as error:
-        assert "replaces" in str(error)
-    else:
-        raise AssertionError("background= and slides= are one choice, not two")
-
-
-def test_a_named_mask_without_a_background_is_refused():
-    try:
-        sessions_for(["case_001.tif"], masks=[Mask("Tissue", Drive("/nowhere"))])
-    except ValueError as error:
-        assert "background=" in str(error)
-    else:
-        raise AssertionError("a Mask has nowhere to read from without background=")
+    assert html.count('class="rf-card rf-slide-card"') == len(sessions)
 
 
 def main() -> int:
