@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install the dev group (package, both extras, pytest, ruff)
+      - name: Install the dev group (package, its one extra, pytest, ruff)
         run: uv sync --group dev
 
       - name: Lint

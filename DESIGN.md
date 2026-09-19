@@ -120,7 +120,7 @@ below the table rather than quietly rewriting it.
 | 9 | Can two runs differ? | **No.** Same sessions in, byte-identical HTML out — asserted in `test_the_same_report_renders_byte_identical_html` |
 | 10 | Who may create report HTML? | **Two components and the page itself.** `RawHtml` is gone: one block accepting arbitrary markup makes the set advisory |
 | 11 | How does the agent learn xOpat's vocabulary? | **From the viewer**, at a permalink, for the version deployed in front of it. ~~A generated schema bundled in the skill~~ — see reversals |
-| 12 | Is there a CLI? | **No, beyond delivering the skill.** `reportfast plan/build/find` were built and deleted |
+| 12 | Is there a CLI? | **No, beyond printing the skill.** `reportfast plan/build/find` were built and deleted |
 
 ## Reversals
 
