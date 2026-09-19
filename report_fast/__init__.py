@@ -43,7 +43,7 @@ typed.
 """
 
 from .components import SlideCard, SlideGrid
-from .config import BUILTIN_PRESET, SessionPreset, load_preset, parse_preset
+from .config import BUILTIN_PRESET, SessionPreset
 from .core import BASE_CSS, BaseComponent, ComponentRegistry, Report, Section
 from .layer import colormap_layer, heatmap_layer
 from .masks import (
@@ -84,8 +84,6 @@ __all__ = [
     # defaults
     "SessionPreset",
     "BUILTIN_PRESET",
-    "load_preset",
-    "parse_preset",
     # the wire format
     "XopatEndpoint",
     "XopatError",

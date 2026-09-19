@@ -2,9 +2,10 @@
 
 A `XopatSession` *builds* a session from a slide path (`from_slide`) or
 *accepts* one someone else authored (`from_config`, `from_url`), and hands back
-the config dict or the viewer link. It imports no web framework and touches no
-I/O beyond reading a preset file, so a user script can build its own HTML from
-`.url()` without the rest of this package.
+the config dict or the viewer link. It imports no web framework, and the only file
+it ever opens is a session the caller named -- `from_file`, the paste path -- never
+a default, a config, or anything the script did not ask for. A user script can
+build its own HTML from `.url()` without the rest of this package.
 
 Two invariants carry the design:
 
@@ -596,7 +597,7 @@ class XopatSession:
         lossless: Optional[bool] = None,
         protocol: Optional[str] = None,
         options: Optional[Mapping[str, Any]] = None,
-        preset: Union[None, SessionPreset, Mapping[str, Any], str, Path] = None,
+        preset: Optional[SessionPreset] = None,
     ) -> "XopatSession":
         """Build the common session: one background plus its overlay layers.
 
@@ -614,9 +615,9 @@ class XopatSession:
             protocol: Slide-protocol name for the background. Unset leaves the
                 deployment's `default_background_protocol`, and a preset's value
                 wins over the endpoint's.
-            preset: Defaults to merge under everything, as a `SessionPreset`, a
-                mapping, a file path, or `None` for `$XOPAT_SESSION_CONFIG` /
-                the builtin.
+            preset: A `SessionPreset` of defaults to merge under everything, or
+                `None` for the builtin. It is an object, not a file: this
+                library reads no session defaults from disk.
 
         Returns:
             A session that renders as one viewer tab per call.
@@ -886,7 +887,7 @@ def sessions_from_paths(
     names: Optional[Callable[[Slide], str]] = None,
     params: Optional[Mapping[str, Any]] = None,
     endpoint: Optional[XopatEndpoint] = None,
-    preset: Union[None, SessionPreset, Mapping[str, Any], str, Path] = None,
+    preset: Optional[SessionPreset] = None,
 ) -> List[XopatSession]:
     """One session per slide, from paths.
 
@@ -940,7 +941,7 @@ def sessions_from_folder(
     names: Optional[Callable[[Slide], str]] = None,
     params: Optional[Mapping[str, Any]] = None,
     endpoint: Optional[XopatEndpoint] = None,
-    preset: Union[None, SessionPreset, Mapping[str, Any], str, Path] = None,
+    preset: Optional[SessionPreset] = None,
     sort: Optional[Callable[[Path], Tuple]] = lambda path: path.name,
 ) -> List[XopatSession]:
     """One session per slide found in `directory`.
@@ -991,7 +992,7 @@ def as_session(
     name: Optional[str] = None,
     params: Optional[Mapping[str, Any]] = None,
     endpoint: Optional[XopatEndpoint] = None,
-    preset: Union[None, SessionPreset, Mapping[str, Any], str, Path] = None,
+    preset: Optional[SessionPreset] = None,
 ) -> XopatSession:
     """Coerce anything session-shaped into a session.
 

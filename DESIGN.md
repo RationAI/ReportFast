@@ -111,7 +111,7 @@ below the table rather than quietly rewriting it.
 | --- | --- | --- |
 | 1 | Does a session render itself, or is it config + a card? | Both: the session is a value object, `SlideCard(session=…)` renders it |
 | 2 | How does a 300-case grid avoid typing 300 documents? | **The script loops.** `from_slide()`/`case_matrix()` per case; `SessionTemplate.bind()` when a hand-authored shape needs refilling |
-| 3 | What shape do the defaults take? | `SessionPreset`, overridable per call. ~~A preset **file**~~ — see reversals |
+| 3 | What shape do the defaults take? | `SessionPreset`, built in code, overridable per call. ~~A preset **file**~~ — see reversals |
 | 4 | Static file or served app? | **Static only.** No server, no state, no re-render |
 | 5 | Where do masks come from? | A `Mask` names a layer and carries its own **source** — `Drive` folder or `MlflowRun` artifacts — so the call reads like the job |
 | 6 | Does the agent write the report, the code, or the manifest? | **The code.** The manifest is gone; the script is the interface and the record |
@@ -147,6 +147,19 @@ the package, because a procedure shipped separately from the code it describes d
 from it. So `reportfast` prints and writes nothing, which two tests now hold: the
 module has no write path in it, and `skill show` leaves the bundle's files
 byte-for-byte as they were.
+
+**The preset file.** `load_preset` read JSON or TOML from `$XOPAT_SESSION_CONFIG` and
+merged it under every session, and `parse_preset` validated the document against
+`FORBIDDEN_KEYS` and `PRESET_KEYS`. It contradicted *Not doing*, was documented
+nowhere a reader could see, and was strictly less expressive than the script it was
+supposed to simplify: `params`, `plugins`, `layers`, `protocol`, `options`,
+`lossless` and four endpoint fields, each also settable by passing a `SessionPreset`,
+an `XopatEndpoint` or a `Report(theme=…)`. An environment variable nobody typed could
+change a report's numbers, invisibly, which is the exact property the script exists to
+prevent. `preset=` now takes a `SessionPreset` or nothing — a real signature change,
+and a mapping is refused rather than ignored. One part of the old design improved on
+the way out: the forbidden keys were a runtime check, and are now structural, because
+`SessionPreset` has no field that could carry an index-referencing list.
 
 **The validation gate** (`a529e0a`). `schema/` (2,400 generated lines),
 `derive_schema.py`, `contract.py`, `audit.py`, `shader.py`, `strict=`. See *What
@@ -252,7 +265,7 @@ Fails loudly:
 | A protocol name that looks like inline JS | `_reject_inline_protocol` — the viewer strips it silently, so this is caught early |
 | No mask file for any case (mistyped run id or artifact dir) | `MlflowError`, naming the sources with zero hits |
 | A palette/breaks/classes mismatch | `colormap_layer` raises rather than emitting a layer the viewer rejects |
-| A preset file that is set but unreadable | `XopatError` — quietly ignoring a config someone pointed at is the worse failure |
+| `preset=` handed a mapping or a path | `XopatError` — silently falling back to the builtin would build the report on defaults the script never named |
 | A background or shader with no `dataReference` at all | `XopatError` |
 
 Fails quietly, on purpose or for now:
@@ -293,11 +306,11 @@ report_fast/
 ├── session.py    XopatSession, SessionTemplate, folder/path helpers   (no FastHTML)
 ├── layer.py      the two layer shapes it is worth building
 ├── masks.py      Mask + its source (Drive / MlflowRun) → sessions, coverage, dropped
-├── config.py     SessionPreset: builtin → file → kwargs
+├── config.py     SessionPreset, built in code: builtin → preset → kwargs
 ├── mlflow.py     runs in / report out; the only MLflow importer
 ├── core.py       Report: the page shell, BASE_CSS, the two prose fields
 ├── components/   SlideCard, SlideGrid
-├── skill.py      locating and placing the bundle
+├── skill.py      locating the bundle and reading one file out of it
 └── __main__.py   `reportfast skill …`
 ```
 
@@ -386,16 +399,16 @@ Run ids that are referenced elsewhere and are not otherwise rediscoverable live 
   workaround.
 - No generated per-report Python, and no committed intermediate nobody asked for.
 - No configuration *file* for the library. Endpoints come from the environment and
-  sessions from code. `config.py`'s `load_preset` reading `$XOPAT_SESSION_CONFIG` is
-  the last exception and is listed under *Open* for that reason.
+  sessions from code. This now holds with no exceptions.
 
 ## Open
 
-- **`SessionTemplate`, `SessionPreset`, `config.py`.** All three are public API from
-  before the CLI went. `SessionTemplate.bind()` is the honest answer to refilling a
-  hand-authored session 300 times, so it has a job; `load_preset` reading a file from
-  `$XOPAT_SESSION_CONFIG` contradicts *Not doing* and has no consumer in the skill.
-  Either the preset file earns a documented use or it goes.
+- **`SessionTemplate` and `SessionPreset`.** Both are public API from before the CLI
+  went. `SessionTemplate.bind()` is the honest answer to refilling a hand-authored
+  session 300 times, so it has a job. `SessionPreset` is now a small in-code object
+  with no file behind it, which makes it cheap to keep and cheap to delete; it has no
+  caller in the skill, and a `params` dict passed to `from_slide` covers the same
+  ground for a single session. It stays until something argues for it.
 - **The skill's version stamp is handwritten.** `SKILL.md` says "xOpat 3.1.0 @
   `18c94f2`" and nothing regenerates it — deliberately, since the thing it would
   regenerate from was the deleted generator. The skill therefore tells the agent to

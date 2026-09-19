@@ -30,8 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from report_fast.config import (  # noqa: E402
     BUILTIN_PRESET,
     SessionPreset,
-    load_preset,
-    parse_preset,
+    resolve_preset,
 )
 from report_fast.session import (  # noqa: E402
     SessionTemplate,
@@ -659,10 +658,10 @@ def test_as_session_treats_a_bare_path_like_the_builders_do():
 
 
 def test_preset_supplies_defaults_the_caller_can_override():
-    preset = {
-        "params": {"theme": "dark", "ui": {"toolBar": False}},
-        "protocol": "iipimage",
-    }
+    preset = SessionPreset(
+        params={"theme": "dark", "ui": {"toolBar": False}},
+        protocol="iipimage",
+    )
     session = XopatSession.from_slide(SLIDE, endpoint=endpoint(), preset=preset)
     assert session.params == {"theme": "dark", "ui": {"toolBar": False}}
     assert session.data[0] == {
@@ -683,52 +682,75 @@ def test_preset_supplies_defaults_the_caller_can_override():
 
 
 def test_preset_default_layers_apply_when_the_caller_passes_none():
-    preset = {"layers": [{"path": OVERLAY, "type": "heatmap", "name": "Probability"}]}
+    preset = SessionPreset(
+        layers=({"path": OVERLAY, "type": "heatmap", "name": "Probability"},)
+    )
     session = XopatSession.from_slide(SLIDE, endpoint=endpoint(), preset=preset)
     assert len(session.data) == 2
     explicit = XopatSession.from_slide(SLIDE, [], endpoint=endpoint(), preset=preset)
     assert len(explicit.data) == 2, "an empty layer list is a request for none"
 
 
-def test_preset_refuses_the_lists_it_would_rewire():
-    for key in ("data", "background", "visualizations"):
+def test_a_preset_cannot_carry_the_lists_it_would_rewire():
+    """The rule that `FORBIDDEN_KEYS` once checked at runtime is now structural.
+
+    `data`, `background` and `visualizations` reference each other by index, so a
+    default carrying one would silently rewire the caller's slides. A validator
+    could be bypassed by a new field; a frozen dataclass with no such field cannot
+    carry the mistake in the first place, which is what this pins -- add a `data`
+    field to `SessionPreset` and this fails.
+    """
+    import dataclasses
+
+    fields = {field.name for field in dataclasses.fields(SessionPreset)}
+    rewired = {"data", "background", "visualizations"}
+    assert not fields & rewired, f"a preset can carry {fields & rewired} again"
+    with raises(TypeError):
+        SessionPreset(data=[{}])  # type: ignore[call-arg]
+
+
+def test_a_preset_is_an_object_and_not_a_document():
+    """`preset=` takes a `SessionPreset`, and says so when handed a mapping or a path.
+
+    Both used to be accepted because a preset could arrive from a file. The
+    refusal matters more than the acceptance: a caller who passes a dict today
+    would otherwise get the builtin defaults silently, and a report whose defaults
+    quietly did not apply is the failure this library exists to make loud.
+    """
+    for wrong in ({"params": {"theme": "dark"}}, "/nope/session.json", Path("/nope.json")):
+        with raises(XopatError) as raised:
+            resolve_preset(wrong)
+        assert "SessionPreset" in str(raised.exception), raised.exception
         with raises(XopatError):
-            parse_preset({key: [{}]})
+            XopatSession.from_slide(SLIDE, endpoint=endpoint(), preset=wrong)
 
 
-def test_preset_refuses_keys_the_viewer_would_not_read():
-    with raises(XopatError):
-        parse_preset({"parems": {"theme": "dark"}})
+def test_no_session_default_is_read_from_the_environment_or_a_file():
+    """`$XOPAT_SESSION_CONFIG` is gone, and the builtin is what `None` means.
 
-
-def test_preset_file_is_read_from_disk_and_the_environment():
-    with tempfile.TemporaryDirectory() as folder:
-        path = Path(folder, "session.json")
-        path.write_text(json.dumps({"params": {"theme": "dark"}}), encoding="utf-8")
-        assert load_preset(path).params == {"theme": "dark"}
-
-        os.environ["XOPAT_SESSION_CONFIG"] = str(path)
-        try:
-            session = XopatSession.from_slide(SLIDE, endpoint=endpoint())
-            assert session.params == {"theme": "dark"}
-        finally:
-            del os.environ["XOPAT_SESSION_CONFIG"]
-    assert load_preset() == BUILTIN_PRESET
+    Checked against a live environment variable because that is the shape the
+    failure had: a value set in a shell, invisible in the script, merged under the
+    script's own numbers.
+    """
+    os.environ["XOPAT_SESSION_CONFIG"] = "/tmp/definitely-not-a-preset.json"
+    try:
+        assert resolve_preset(None) is BUILTIN_PRESET
+        assert XopatSession.from_slide(SLIDE, endpoint=endpoint()).params == {}
+    finally:
+        del os.environ["XOPAT_SESSION_CONFIG"]
+    source = (Path(__file__).resolve().parents[1] / "report_fast" / "config.py").read_text()
+    for gone in ("tomllib", "json.loads", "read_text", "environ", "expanduser"):
+        assert gone not in source, f"config.py reads a file again: {gone}"
 
 
 def test_preset_can_pin_the_deployment():
-    preset = parse_preset(
-        {"base_url": BASE, "wsi_base_url": TILES, "image_protocol": "wsi"}
+    preset = SessionPreset(
+        endpoint=XopatEndpoint(base_url=BASE, wsi_base_url=TILES, image_protocol="wsi")
     )
     session = XopatSession.from_slide(SLIDE, preset=preset)
     assert session.endpoint.wsi_base_url == TILES
     assert session.data[0]["protocol"] == "wsi"
     assert session.url().startswith(BASE)
-
-
-def test_preset_missing_file_is_an_error_not_a_shrug():
-    with raises(XopatError):
-        load_preset("/nope/session.json")
 
 
 def test_session_preset_merge_prefers_the_later():

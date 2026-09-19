@@ -1,39 +1,34 @@
 """Where session defaults come from.
 
-Precedence for a built session is **builtin -> preset file -> pasted config ->
-kwargs**. A preset is *session-shaped*: it uses the viewer's own keys, so
-anything valid in a hand-written session is valid in a preset, and a user can
-read, diff and version it without learning a second schema.
+Precedence for a built session is **builtin -> preset -> kwargs**. A preset is
+*session-shaped*: it uses the viewer's own keys, so anything valid in a
+hand-written session is valid in a preset's `params`, and the object reads like
+the document it configures.
 
-A preset deliberately cannot carry `data`, `background` or `visualizations`.
-Those lists reference each other by index, so a default that shipped one would
-silently rewire whatever the user passed -- the slides come from the caller or
-from a pasted config, never from a default.
+A preset is built in code and passed to `preset=`. It used to also be readable
+from a file named by `$XOPAT_SESSION_CONFIG`, and that is gone: a file the script
+never mentions merged invisibly under a script's values, which is the one property
+a report must not have. It was also strictly less expressive than the script —
+`params`, `plugins`, `layers`, `protocol`, `options`, `lossless` and four endpoint
+fields, every one of them settable by passing a `SessionPreset`, an
+`XopatEndpoint` or a `Report(theme=...)`. A hidden variable that can set a subset
+of what code can set, and is documented nowhere the reader sees, is a second way
+to do what the script already does.
+
+A preset cannot carry `data`, `background` or `visualizations`, and now cannot
+accidentally be asked to: those lists reference each other by index, so a default
+carrying one would silently rewire whatever the caller passed. A frozen dataclass
+with four fields cannot express it, which is a better guarantee than a validator
+checking for it -- the rule that survives is in the field list, not in an error
+message.
 """
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional
 
 from .xopat import XopatEndpoint, XopatError
-
-#: Environment variable pointing at the preset file users edit.
-ENV_CONFIG_VAR = "XOPAT_SESSION_CONFIG"
-
-#: Keys that reference `data[]` by index and therefore cannot be defaulted.
-FORBIDDEN_KEYS = ("data", "background", "visualizations")
-
-#: Endpoint fields a preset may pin, so a report aimed at another deployment
-#: needs only the preset file.
-ENDPOINT_KEYS = ("base_url", "wsi_base_url", "image_protocol", "mount_root")
-
-PRESET_KEYS = frozenset(
-    {"params", "plugins", "layers", "protocol", "options", "lossless", *ENDPOINT_KEYS}
-)
 
 
 def deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
@@ -67,7 +62,6 @@ class SessionPreset:
             format, pixel-size hints).
         lossless: Default for the lossless overlay tiles.
         endpoint: Deployment coordinates to use when the caller passes none.
-        source: Where the preset was read from, for error messages.
     """
 
     params: Dict[str, Any] = field(default_factory=dict)
@@ -77,7 +71,6 @@ class SessionPreset:
     options: Dict[str, Any] = field(default_factory=dict)
     lossless: bool = True
     endpoint: Optional[XopatEndpoint] = None
-    source: Optional[str] = None
 
     def merge(self, other: "SessionPreset") -> "SessionPreset":
         """`other` wins; this preset supplies the values it leaves unset."""
@@ -89,7 +82,6 @@ class SessionPreset:
             options=deep_merge(self.options, other.options),
             lossless=other.lossless,
             endpoint=other.endpoint or self.endpoint,
-            source=other.source or self.source,
         )
 
 
@@ -99,114 +91,30 @@ class SessionPreset:
 BUILTIN_PRESET = SessionPreset(lossless=True)
 
 
-def parse_preset(
-    mapping: Mapping[str, Any], *, source: Optional[str] = None
-) -> SessionPreset:
-    """Validate one preset document.
+def resolve_preset(preset: Optional[SessionPreset]) -> SessionPreset:
+    """Normalise the preset argument a caller may have passed.
 
     Raises:
-        XopatError: on a key the viewer would not read, or on one of
-            `FORBIDDEN_KEYS` -- a default that carries data or backgrounds would
-            overwrite the caller's slides through their indices.
+        XopatError: on a mapping or a path. Both were accepted while a preset
+            could come from a file, and a document is no longer a thing this
+            library reads -- the message says so rather than failing with
+            argparse-style confusion about an unexpected keyword.
     """
-    if not isinstance(mapping, Mapping):
-        raise XopatError(
-            f"Session preset must be a mapping, got {type(mapping).__name__}"
-        )
-
-    keys = set(mapping)
-    forbidden = sorted(keys.intersection(FORBIDDEN_KEYS))
-    if forbidden:
-        raise XopatError(
-            f"Session preset {source or ''}".rstrip()
-            + f" cannot define {forbidden}: those lists reference `data[]` by index, so a "
-            "default carrying them would silently rewire the slides the caller passed. "
-            f"Set defaults in {sorted(PRESET_KEYS)} instead."
-        )
-    unknown = sorted(keys - PRESET_KEYS)
-    if unknown:
-        raise XopatError(
-            f"Unknown preset keys {unknown}. A preset only carries defaults "
-            f"({sorted(PRESET_KEYS)}); slide-specific config belongs in a pasted session."
-        )
-
-    layers = mapping.get("layers") or ()
-    if isinstance(layers, Mapping):
-        layers = (layers,)
-    else:
-        layers = tuple(layers)
-
-    endpoint = None
-    if keys.intersection(ENDPOINT_KEYS):
-        endpoint = XopatEndpoint(
-            **{key: mapping[key] for key in ENDPOINT_KEYS if key in mapping}
-        )
-
-    return SessionPreset(
-        params=dict(mapping.get("params") or {}),
-        plugins=dict(mapping.get("plugins") or {}),
-        layers=layers,
-        protocol=mapping.get("protocol"),
-        options=dict(mapping.get("options") or {}),
-        lossless=bool(mapping.get("lossless", True)),
-        endpoint=endpoint,
-        source=source,
+    if preset is None:
+        return BUILTIN_PRESET
+    if isinstance(preset, SessionPreset):
+        return BUILTIN_PRESET.merge(preset) if preset is not BUILTIN_PRESET else preset
+    raise XopatError(
+        f"`preset` takes a SessionPreset, got {type(preset).__name__}. Passing a mapping "
+        "or a file path went with the preset file: build the object "
+        "(`SessionPreset(params={...}, endpoint=...)`) so the script says what the "
+        "report was built with."
     )
 
 
-def load_preset(path: Optional[Union[str, Path]] = None) -> SessionPreset:
-    """Read a preset file (`.json`, or `.toml` on Python 3.11+) over the builtin.
-
-    `path` defaults to `$XOPAT_SESSION_CONFIG`; with neither, the builtin
-    defaults apply. A missing or unreadable file is an error rather than a
-    silent fallback -- a user who set the variable expects their config to
-    apply, and quietly ignoring it is the worse failure.
-    """
-    if path is None:
-        path = os.environ.get(ENV_CONFIG_VAR)
-    if not path:
-        return BUILTIN_PRESET
-
-    file_path = Path(path).expanduser()
-    if not file_path.is_file():
-        raise XopatError(f"Session preset {file_path} does not exist.")
-
-    text = file_path.read_text(encoding="utf-8")
-    if file_path.suffix.lower() == ".toml":
-        try:
-            import tomllib
-        except ImportError:  # pragma: no cover - Python 3.10
-            raise XopatError(
-                f"{file_path} is TOML; reading it needs Python 3.11+. Use JSON."
-            ) from None
-        raw: Any = tomllib.loads(text)
-    else:
-        raw = json.loads(text)
-
-    return BUILTIN_PRESET.merge(parse_preset(raw, source=str(file_path)))
-
-
-def resolve_preset(
-    preset: Union[None, SessionPreset, Mapping[str, Any], str, Path],
-) -> SessionPreset:
-    """Normalise the preset argument a caller may have passed in any shape."""
-    if preset is None:
-        return load_preset()
-    if isinstance(preset, SessionPreset):
-        return BUILTIN_PRESET.merge(preset) if preset is not BUILTIN_PRESET else preset
-    if isinstance(preset, Mapping):
-        return BUILTIN_PRESET.merge(parse_preset(preset))
-    return load_preset(preset)
-
-
 __all__ = [
-    "ENV_CONFIG_VAR",
-    "FORBIDDEN_KEYS",
-    "PRESET_KEYS",
     "BUILTIN_PRESET",
     "SessionPreset",
     "deep_merge",
-    "parse_preset",
-    "load_preset",
     "resolve_preset",
 ]
