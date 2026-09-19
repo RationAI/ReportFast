@@ -251,6 +251,9 @@ NOT_LIBRARY_API = {
     "RawHtml": "listed as deleted",
     # A keyword argument of an exported class, not a name you import.
     "mount_root": "endpoint field",
+    # A value the deployment registers, named as the thing to pass -- not a name
+    # anyone imports, and the skill cannot know it from this library's surface.
+    "public_mlflow": "a protocol name the deployment registers",
     # An environment fact the skill tells someone to check for.
     "PATH": "the shell's",
 }
@@ -341,6 +344,34 @@ def test_the_page_arguments_the_skill_lists_are_the_real_ones():
     assert "preamble" in listed, (
         "preamble is the page's only prose besides the title and subtitle; teach it"
     )
+
+
+def test_every_curl_the_skill_teaches_is_bounded():
+    """An unbounded `curl` costs 60s per DataID, and the skill is what an agent copies.
+
+    This is not a style rule. The probe is run once per distinct DataID, the
+    cluster host is unreachable from at least one machine that builds reports,
+    and `curl`'s default is a full minute of waiting per attempt -- which is how a
+    32-card report takes the best part of an hour and an agent then concludes the
+    probe is too expensive to run. Measured: four DataIDs, 241s unbounded and
+    sequential, 5s bounded and parallel.
+    """
+    taught = {
+        name: re.findall(r"```bash\n(.*?)```", text, flags=re.S)
+        for name, text in _bundled_docs().items()
+    }
+    probes = [
+        (name, block)
+        for name, blocks in taught.items()
+        for block in blocks
+        if "curl" in block
+    ]
+    assert probes, "the skill teaches no probe at all"
+    for name, block in probes:
+        for call in re.findall(r"curl[^\n'\"`]*", block):
+            assert "--max-time" in call or "--max-time" in block, (
+                f"{name} teaches an unbounded curl: {call}"
+            )
 
 
 def _bundled_docs() -> dict:

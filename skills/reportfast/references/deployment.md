@@ -7,10 +7,22 @@ cites.
 
 ## The probe, run before anything else
 
+Batched and bounded — `--max-time` is load-bearing, see below:
+
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' \
-  "https://xopat.rationai.cloud.trusted.e-infra.cz/wsi-service/v3/slides/info?slide_id=<DataID>"
+printf '%s\n' "$DATA_IDS" | xargs -P 8 -I{} -n1 sh -c \
+  'printf "%s %s\n" "$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" \
+  "https://xopat.rationai.cloud.trusted.e-infra.cz/wsi-service/v3/slides/info?slide_id={}")" "{}"' \
+  | sort
 ```
+
+**Bound every probe, and run them together.** `curl` on an unreachable host waits
+its full default of 60 seconds, so one-at-a-time probing costs a minute per
+DataID. Measured here: four DataIDs took 240s unbounded and sequential, 5s bounded
+and parallel. This is why a large report can take the best part of an hour to
+build — not the HTML, the probing — and the answer is to make the probe cheap,
+never to skip it. A report whose links were never checked is exactly the report
+that says "works" and shows black cards.
 
 Three outcomes, and the third is the one most often misreported:
 

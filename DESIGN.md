@@ -279,11 +279,18 @@ Fails quietly, on purpose or for now:
   report. The message goes to a browser console the reader never opens.
 - **A slide that is not there.** The builder never opens a slide. Nothing checks
   shared-path agreement between the building machine and the tile server.
+- **An artifact prefix the deployment does not serve.** `artifact_data_id()` defaults
+  to `mflow`; the real namespace is a fact about the WSI-Service's registered
+  protocols. A wrong prefix produces well-formed DataIDs, real artifacts and a report
+  that builds clean with every overlay missing. Found in use, not in review.
 
-The last three all have the same shape: they are facts about a viewer this library
+The last four all have the same shape: they are facts about a viewer this library
 does not run, and every attempt to check them in Python has been deleted. They are
 therefore *procedure* — in the skill, phrased as things to check and to say — rather
-than guarantees.
+than guarantees. The prefix is the one with a cheap fix available and no clean way to
+verify it here: the tile server is unreachable from this pod, so a check against it
+could be written and tested exactly once, by someone else, on a machine that can
+reach it.
 
 ## Reproducibility
 

@@ -119,12 +119,21 @@ somebody's run is in the record, and there is no clean way to take it back out.
 
 Credentials go through the environment, never into a script or a report.
 
+**On reproducibility:** the record of a report is its script, not a copy of its
+inputs, so `publish()` stores no config by default — the script names the folders,
+colours, order and layout and can be re-run, which a frozen config cannot. Where a
+run should carry the inputs anyway, `publish(extra_dir=…)` logs a directory beside
+the page under `report/conf`.
+
 ## Configuration
 
 `XOPAT_BASE_URL` (viewer root), `XOPAT_WSI_BASE_URL` (tile server — its own mount, not
 under the viewer's), `XOPAT_IMAGE_PROTOCOL`, `XOPAT_MOUNT_ROOT` (the prefix stripped to
-form a DataID), `MLFLOW_TRACKING_URI`, `MLFLOW_WEB_URL`. Each can also be passed per
-call. `references/deployment.md` lists every one with its default and where it is read.
+form a DataID), `MLFLOW_TRACKING_URI`, `MLFLOW_WEB_URL`, and
+`REPORTFAST_MLFLOW_ARTIFACT_PREFIX` (the DataID namespace a deployment's tile server
+registers MLflow artifacts under — wrong value, no error, no overlays; see the skill).
+Each can also be passed per call. `references/deployment.md` lists every one with its
+default and where it is read.
 
 Two facts that cost time when unknown:
 

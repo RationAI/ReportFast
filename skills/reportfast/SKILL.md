@@ -164,10 +164,21 @@ different thing from a block that accepts arbitrary markup.
 fasthtml directly. That is the extension path, not a loophole around the above:
 the point is that the *shipped* set stays two.
 
-## The two ways a report is silently wrong
+## The three ways a report is silently wrong
 
-Everything else degrades loudly enough to notice. These two do not, and both are
-why the library exists rather than being a `json.dumps` in your script.
+Everything else degrades loudly enough to notice. These three do not, and the first
+two are why the library exists rather than being a `json.dumps` in your script.
+
+**An artifact prefix the tile server does not serve.** `artifact_data_id()` writes
+`mflow/…` by default; the namespace is a deployment fact, and a deployment whose
+WSI-Service registers `public_mlflow` needs `Mlflow(artifact_prefix="public_mlflow")`
+or `REPORTFAST_MLFLOW_ARTIFACT_PREFIX`. Get it wrong and *everything upstream is
+fine*: the DataIDs are well-formed, the artifacts exist in MLflow with the right
+bytes, the report builds clean and looks complete — and every overlay is missing,
+because the tile server answers "Slide … does not exist". Nothing in this library can
+see it, because nothing here asks the tile server. So a report whose overlays are all
+absent while its backgrounds show is **that** bug until disproved, and the disproof is
+one probe of a single artifact DataID. Do not start by suspecting the mask generation.
 
 **An invented `params` key.** `sanitizeAgainst` in the viewer's `app.ts` drops
 every session param outside its allowlist *without a word*. The layer then
@@ -192,12 +203,22 @@ building the report and the tile server must see the same file under the same
 root — nothing checks this, and the failure surfaces when someone opens the page.
 
 So probe, then say what you probed. Every distinct DataID, against the viewer's
-own first request:
+own first request — **batched, and bounded**:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' \
-  "https://xopat.rationai.cloud.trusted.e-infra.cz/wsi-service/v3/slides/info?slide_id=<DataID>"
+printf '%s\n' "$DATA_IDS" | xargs -P 8 -I{} -n1 sh -c \
+  'printf "%s %s\n" "$(curl -s --max-time 5 -o /dev/null -w "%{http_code}" \
+  "https://xopat.rationai.cloud.trusted.e-infra.cz/wsi-service/v3/slides/info?slide_id={}")" "{}"' \
+  | sort
 ```
+
+`--max-time` is not a style choice. An unreachable host does not answer, and
+`curl` waits its full default — **60 seconds per DataID, one at a time** — so a
+32-card report on a pod that cannot reach the tile server spends half an hour
+probing, then prints `000` thirty-two times. Measured on this pod: four DataIDs,
+240s unbounded and sequential, 5s bounded and parallel. Batch it or you will be
+tempted to skip the probe, and skipping it is the failure this page exists to
+prevent.
 
 Three outcomes, and they are not the same sentence:
 
@@ -212,13 +233,18 @@ Three outcomes, and they are not the same sentence:
 
 ## MLflow
 
-Read `references/mlflow.md` before touching a run. Three things matter immediately:
+Read `references/mlflow.md` before touching a run. Four things matter immediately:
 
 - The tracking server speaks the **2.x** API. The extra is capped
-  `mlflow>=2.8,<3`; a 3.x client 404s when listing artifacts.
+  `mlflow>=2.8,<3`; under a 3.x client `MlflowClient.list_artifacts` 404s, so a run
+  reads as holding no files. A project pinned to mlflow 3 keeps it — give the report
+  its own environment (`uv` project per reporting job, or `uvx`) instead of
+  downgrading the project.
 - Artifacts are **addressed, never downloaded**. A run's artifact becomes the
   DataID `mflow/<experiment_id>/<run_id>/artifacts/<path>`, and `mflow` is a
-  namespace the tile server resolves — not a directory on your machine.
+  namespace the tile server resolves — not a directory on your machine. If the
+  deployment registers a different one, that name goes in `Mlflow(artifact_prefix=…)`
+  (see *The three ways a report is silently wrong*).
 - **`publish()` is asked for, out loud.** It is the only name in this library that
   uploads. Nothing implies it: not a key, not CI, not "they obviously want it up
   there". Publishing to a run writes to someone's record.

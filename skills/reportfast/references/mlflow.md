@@ -11,10 +11,21 @@ back. The extra is `report-fast[mlflow]`; everything here is in
 | Tracking API | `http://mlflow.rationai-mlflow:5000/` | inside the cluster, this pod included |
 | Web UI | `https://mlflow.rationai.cloud.trusted.e-infra.cz/` | a browser; the links a report shows |
 
-The tracking server speaks **2.x**. The extra is capped `mlflow>=2.8,<3` and a
-3.x client breaks against it — listing artifacts 404s on
-`/mlflow/logged-models/search` — so install the extra rather than a bare
-`mlflow`.
+The tracking server speaks **2.x** and the extra is capped `mlflow>=2.8,<3` —
+pinned to the deployment, not chosen. Verified against the live server with an
+mlflow 3.16 client: `get_run` and `get_experiment_by_name` still answer, but
+`list_artifacts` — which is what `slides()`, `artifacts()` and `data_ids()` walk —
+routes through `/mlflow/logged-models/search`, an endpoint this server has never
+had, and 404s. So an mlflow 3 environment reads run metadata fine and then reports
+that a run holds no files, which reads as an empty run rather than a version
+mismatch.
+
+**A project that needs mlflow 3 keeps it and gives reporting its own
+environment** — a `uv` project per reporting job, or `uvx`. That is the supported
+answer while the server speaks 2.x; the alternative is this library reimplementing
+artifact listing over the raw REST endpoint the server does answer
+(`/api/2.0/mlflow/artifacts/list`), which is a second protocol to maintain and has
+not been ruled in.
 
 `Mlflow.from_env()` reads `MLFLOW_TRACKING_URI`, `MLFLOW_WEB_URL` and
 `REPORTFAST_MLFLOW_ARTIFACT_PREFIX`. Credentials go through the environment or
