@@ -1,18 +1,19 @@
 """Tests for `report_fast.skill` -- the skill that travels inside the wheel.
 
-The install contract, in one sentence: `uv add report-fast` puts the library in a
-project's venv and cannot put the skill anywhere an agent looks (packaging forbids
-an install from writing outside its environment), so the skill ships inside the
-package and `reportfast skill install` moves it. These tests pin both halves: that
-the bundle is found from either layout, and that nothing moves without being asked.
+The contract, in one sentence: the skill is *bundled*, never installed. `uv add
+report-fast` puts the library in a project's venv and the skill inside the wheel,
+and `reportfast skill show` reads it from there; a project that wants Claude Code
+to see the skill commits a `skills/` directory, which is Claude Code's mechanism
+rather than this package's. These tests pin the bundling: that the bundle is found
+from either layout, that its files are readable by name, and that a name outside it
+is refused.
 
-Two things are deliberately *not* done here. Nothing writes to `~/.claude/skills` --
-every install goes to a temp `--dest`, because a test that installs into the
-developer's own skill directory would change which skills their next session sees.
-And the wheel itself is not built and inspected (that is a build-step test, slow and
-dependent on the packaging tool); instead the force-include target is asserted
-against `pyproject.toml`, so a renamed target fails a test rather than producing an
-install where `skill show` lies.
+There used to be an `install()` here, and with it `target_for`, `find_installed`,
+the personal/project directories and seven tests -- all deleted, so nothing in this
+file writes to a filesystem. The wheel is still not built and inspected (that is a
+build-step test, slow and dependent on the packaging tool); instead the force-include
+target is asserted against `pyproject.toml`, so a renamed target fails a test rather
+than producing an install where `skill show` lies.
 
 Run:      cd /home/jovyan/report_fast && python tests/test_skill.py
 Pytest:   pytest tests/test_skill.py
@@ -23,9 +24,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import re
-import shutil
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
@@ -146,96 +145,36 @@ def test_a_missing_reference_lists_what_there_is():
         raise AssertionError("a missing file raised nothing")
 
 
-# ── installing: asked for, one directory, never silently ────────────────────
+# ── nothing here installs ───────────────────────────────────────────────────
+#
+# There used to be five tests for `install()` and two for `skill where`, and they
+# were deleted rather than rewritten: Claude Code takes a skill from a committed
+# `skills/` directory or as a plugin, so a library that copies one into
+# `~/.claude/skills` was reimplementing someone else's mechanism badly. What is
+# checked instead is the property that made the deletion safe -- the module has no
+# write path left in it.
 
 
-def test_install_copies_into_the_directory_it_named():
-    home = Path(tempfile.mkdtemp())
-    try:
-        placed = skill_module.install(home)
-        assert placed == home / skill_module.SKILL_NAME
-        assert (placed / skill_module.SKILL_FILE).is_file()
-        assert (placed / "references" / "xopat-v3.md").is_file()
-        # A copy, not a pointer at the checkout: an installed library has no
-        # checkout, and a skill that reads its references from one would break
-        # where it is most used.
-        assert not placed.is_symlink()
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
+def test_the_module_has_no_way_to_write():
+    """`install` is gone from the API, not merely from the CLI.
 
-
-def test_install_does_not_replace_an_edit_without_being_told_to():
-    home = Path(tempfile.mkdtemp())
-    try:
-        skill_module.install(home)
-        edited = home / skill_module.SKILL_NAME / "NOTES.md"
-        edited.write_text("handwritten", encoding="utf-8")
-        try:
-            skill_module.install(home)
-        except SkillError as error:
-            assert "already holds" in str(error) and "--force" in str(error), error
-        else:
-            raise AssertionError("an existing install was replaced silently")
-        assert edited.read_text(encoding="utf-8") == "handwritten"
-
-        skill_module.install(home, force=True)
-        assert not edited.exists(), "--force replaces the directory it was given"
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
-
-
-def test_install_can_link_so_a_checkout_edit_is_live():
-    home = Path(tempfile.mkdtemp())
-    try:
-        placed = skill_module.install(home, link=True)
-        assert placed.is_symlink()
-        assert placed.resolve() == skill_module.skill_dir().resolve()
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
-
-
-def test_install_creates_a_parent_that_is_not_there_yet():
-    """A fresh machine has no ~/.claude/skills; the first install makes one."""
-    home = Path(tempfile.mkdtemp())
-    try:
-        nested = home / "never" / "made"
-        placed = skill_module.install(nested)
-        assert (placed / skill_module.SKILL_FILE).is_file()
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
-
-
-def test_personal_is_the_default_and_project_is_the_other_choice():
-    """Default is personal, and the reason is a decision about a repository.
-
-    A project install creates `.claude/skills/`, which then has to be gitignored or
-    committed -- which is that repository's business. Personal answers the question
-    an agent asks ("how do I build a report?") in every project at once.
+    Checked against `__all__` and the source rather than against prose: the failure
+    this prevents is the function coming back under the same name because a caller
+    asked for it, which would put a home-directory write back into a library.
     """
-    assert skill_module.target_for(None) == skill_module.PERSONAL_DIR / skill_module.SKILL_NAME
-    assert skill_module.target_for(None, project=True) == (
-        skill_module.PROJECT_DIR / skill_module.SKILL_NAME
+    gone = {"install", "target_for", "find_installed", "PERSONAL_DIR", "PROJECT_DIR"}
+    exported = set(skill_module.__all__)
+    assert not gone & exported, f"the installer is exported again: {sorted(gone & exported)}"
+    assert not gone & {n for n in dir(skill_module) if not n.startswith("_")}, (
+        "an installer function is back in report_fast.skill"
     )
-    assert skill_module.target_for("/tmp/x") == Path("/tmp/x") / skill_module.SKILL_NAME
+    source = (ROOT / "report_fast" / "skill.py").read_text(encoding="utf-8")
+    bodies = re.sub(r'""".*?"""', "", source, flags=re.S)
+    for write in ("shutil", "copytree", "rmtree", "symlink", "mkdir", "write_text"):
+        assert write not in bodies, f"skill.py touches the filesystem again: {write}"
 
 
 # ── the CLI ─────────────────────────────────────────────────────────────────
-
-
-def test_skill_where_reports_the_bundle_and_an_install():
-    home = Path(tempfile.mkdtemp())
-    try:
-        code, printed, _ = run("skill", "where")
-        assert code == 0, printed
-        assert "bundled   " in printed and "reportfast" in printed
-        assert "installed" in printed
-
-        skill_module.install(home)
-        code, printed, _ = run("skill", "where", "--dest", str(home))
-        assert code == 0
-        assert str(home / "reportfast") in printed
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
 
 
 def test_skill_show_prints_the_procedure_and_a_reference():
@@ -246,27 +185,31 @@ def test_skill_show_prints_the_procedure_and_a_reference():
 
 
 def test_skill_without_an_action_asks_for_one():
+    """The refusal names the one action there is, and not the two there were."""
     code, _, err = run("skill")
-    assert code == 4 and "show, install or where" in err, err
+    assert code == 4 and "needs an action: show" in err, err
+    assert "install" not in err, err
 
 
-def test_skill_install_through_the_cli_reports_where_it_went():
-    home = Path(tempfile.mkdtemp())
-    try:
-        code, printed, err = run("skill", "install", "--dest", str(home))
-        assert code == 0, err
-        assert str(home / "reportfast") in printed
-        assert "SKILL.md" in printed
-        # The restart note: an agent that installs the skill and then expects this
-        # session to see it will report that installing does not work.
-        assert "restart" in printed.lower() or "/skills" in printed
+def test_show_writes_nothing():
+    """`show` to stdout is the whole command: run it and check the tree is unchanged.
 
-        code, _, err = run("skill", "install", "--dest", str(home))
-        assert code == 4 and "already holds" in err, err
-        code, _, err = run("skill", "install", "--dest", str(home), "--force")
-        assert code == 0, err
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
+    The point of the deletion was that this package stops putting files in places
+    its users did not choose, so the guarantee is checked by watching rather than by
+    reading: a snapshot of the bundle before and after, entry for entry.
+    """
+    bundle = skill_module.skill_dir()
+    def snapshot() -> list:
+        return sorted(
+            (str(item.relative_to(bundle)), item.stat().st_mtime_ns)
+            for item in bundle.rglob("*")
+            if item.is_file()
+        )
+
+    before = snapshot()
+    assert run("skill", "show")[0] == 0
+    assert run("skill", "show", "--reference", "references/xopat-v3.md")[0] == 0
+    assert snapshot() == before, "printing the skill changed the bundle"
 
 
 def test_a_reference_that_is_not_there_exits_one():

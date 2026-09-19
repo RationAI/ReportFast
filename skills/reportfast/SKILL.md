@@ -7,18 +7,19 @@ description: Build static HTML reports of xOpat v3 pathology sessions — you wr
 
 A report is one HTML file of links into the xOpat v3 viewer. **You write a Python
 script; the library builds the sessions and renders the page.** There is no build
-command. `reportfast` does exactly one thing — it puts this skill where Claude Code
-looks for it:
+command, and nothing to install: `reportfast` has one action, and it prints.
 
 ```bash
-reportfast skill install            # once per machine, into ~/.claude/skills
-reportfast skill install --project  # once per repository, into ./.claude/skills
-reportfast skill show               # print this file without installing anything
-reportfast skill where              # where the bundle is, and whether it is installed
+reportfast skill show                                        # print this file
+reportfast skill show --reference references/xopat-v3.md     # one reference
+reportfast skill show --reference examples/dysplasia_case.json
 ```
 
-No `reportfast` on `PATH`? `uvx report-fast skill install`, or `uv run reportfast
-skill install` inside a project that installed the library.
+You are reading this in a checkout, so the references are files: open
+`skills/reportfast/references/…` directly, which is faster than the CLI. `skill
+show` is for someone with `uv add report-fast` and no checkout — the skill travels
+inside the wheel. Use `uvx report-fast skill show`, or `uv run reportfast skill
+show`, when `reportfast` is not on `PATH`.
 
 The script is the report's record. It is not written into the page, not logged
 beside it, and not stored anywhere by the library — so ask where it should live.

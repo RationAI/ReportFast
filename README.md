@@ -12,17 +12,17 @@ reference, a wrong index — impossible to make quietly.
 
 ## The intended way to use it
 
-Two commands, then every report is a sentence:
+One command installs the library; the skill comes with it:
 
 ```bash
 uv add "report-fast[mlflow] @ git+https://github.com/RationAI/reporting.git"
-uv run reportfast skill install
 ```
 
-The first installs the library, the second puts the **skill** — the procedure an
-agent follows — where Claude Code looks for it. That second step is not decoration:
-installing writes into a venv and may not write anywhere else, so it cannot deliver
-the procedure on its own. `skill where` says where it landed, `skill show` prints it.
+The **skill** — the procedure an agent follows — ships inside the package, and
+`reportfast skill show` prints it. Nothing installs anything. A project that wants
+Claude Code to load the skill as its own commits a `skills/` directory, or installs
+it through Claude Code's own mechanism; either way the library's job ends at
+carrying the file.
 
 Then describe the report: which cases, which slides, which overlays, what colours.
 **The agent writes a Python script**, the library builds the sessions and renders the
@@ -136,15 +136,14 @@ Two facts that cost time when unknown:
 
 ## The CLI is the skill
 
-`reportfast` does one thing — it delivers the procedure an agent follows.
+`reportfast` reads: it prints the procedure an agent follows, and writes nothing.
 
 | | |
 | --- | --- |
-| `skill install` | place the skill in `~/.claude/skills`; `--project` for `./.claude/skills`, `--dest DIR` elsewhere, `--force` to replace one someone may have edited, `--link` to keep a checkout live |
 | `skill show` | print `SKILL.md`; `--reference references/deployment.md` prints a bundled file, including the `examples/*.json` session fixtures |
-| `skill where` | where the bundle is, and whether an agent would find it |
 
 Exit codes: `0` fine, `1` the file asked for is not in the bundle, `4` used wrongly.
+There used to be `skill install` and `skill where`; see *Reversals* in DESIGN.md.
 
 ## Where the detail lives
 

@@ -1,15 +1,18 @@
 """The entry point itself: the exit codes, and the absence of everything else.
 
-`skill install | show | where` behaviour through the CLI is covered in
-`tests/test_skill.py`, where it sits beside the module it exercises. What lives
-here is what only the top level owns: the table of exit codes, the version line,
-and the guarantee that the commands which used to be here stayed deleted.
+`skill show` through the CLI is covered in `tests/test_skill.py`, where it sits
+beside the module it exercises. What lives here is what only the top level owns:
+the table of exit codes, the version line, and the guarantee that the commands
+which used to be here stayed deleted.
 
 That last part is the point of the file. `plan`, `build` and `find` were removed
 because a report is a script the agent writes, and a CLI that still accepted
 `reportfast build report.yaml` -- even to refuse it -- would be a build command
-that lies about being one. Argparse exits on an unknown subcommand through
-`SystemExit`, which `main` maps, so the refusal is testable as a code.
+that lies about being one. `skill install` and `skill where` went the same way for
+a different reason: putting a skill somewhere is Claude Code's job, not a
+library's, so the command line now has one action and it only reads. Argparse
+exits on an unknown subcommand through `SystemExit`, which `main` maps, so each
+refusal is testable as a code.
 """
 
 from __future__ import annotations
@@ -107,17 +110,31 @@ def test_a_skill_that_is_not_in_the_install_exits_one(tmp_path, capsys, monkeypa
     assert "no skill bundled" in capsys.readouterr().err
 
 
-def test_an_unwritable_destination_says_what_to_do_about_it(tmp_path, capsys, monkeypatch):
-    """Permission denied is fixable on the command line, so it is a usage code."""
-    from report_fast import skill as skill_module
+@pytest.mark.parametrize("gone", ["install", "where"])
+def test_a_removed_skill_action_is_a_usage_error(capsys, gone):
+    """`skill install` went because placing a skill is not a library's job.
 
-    def denied(*a, **k):
-        raise PermissionError(13, "Permission denied", str(tmp_path / "skills"))
+    The refusal has to be a code and not a silent fall-through to `show`: an agent
+    that typed `skill install` and got SKILL.md on stdout would conclude that
+    installing worked.
+    """
+    code = run("skill", gone)
+    assert code == USAGE_ERROR
+    printed = capsys.readouterr().err
+    assert "invalid choice" in printed or "usage:" in printed
 
-    monkeypatch.setattr(skill_module, "install", denied)
-    assert run("skill", "install") == USAGE_ERROR
-    hint = capsys.readouterr().err
-    assert "--dest" in hint, "the message must name the way around it"
+
+def test_the_cli_writes_nothing_anywhere():
+    """The one write this command used to do is gone, and stays gone by grep.
+
+    Checked in source because a permission bug only shows on a machine where the
+    destination is not writable -- usually someone else's. A command whose whole
+    contract is "print a file" has no business with these.
+    """
+    source = Path(sys.modules["report_fast.__main__"].__file__).read_text()
+    bodies = re.sub(r'""".*?"""|\'\'\'.*?\'\'\'', "", source, flags=re.S)
+    for gone in ("shutil", "mkdir", "copytree", "rmtree", "symlink", "open(", "write_text"):
+        assert gone not in bodies, f"the CLI touches the filesystem again: {gone}"
 
 
 def test_a_missing_file_is_a_usage_error(tmp_path, capsys, monkeypatch):

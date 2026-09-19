@@ -133,9 +133,20 @@ keeping it.
 `--sessions-dir` as a door. Deleted because the report is requested in chat and what
 answers it is a script; a `build` command was a second, worse way to write the same
 loop over files, and the YAML needed a loader, a schema for the loader, an error
-format for the schema, and a page of documentation about precedence. The colleague
-review had already made the prompt the entry point; this made it the *only* one.
-`reportfast` is now `skill install|show|where`.
+format for the schema, and a page of documentation about precedence. Review had
+already made the prompt the entry point; this made it the *only* one.
+
+**`skill install` and `skill where`.** The CLI's other half, deleted later: the skill
+travelled inside the wheel and one command copied it into `~/.claude/skills`, with
+`--project`, `--dest`, `--force` and `--link` covering where and how. It went because
+Claude Code already has ways to take a skill — a project commits a `skills/`
+directory, or the skill arrives as a plugin — and a library writing into a home
+directory is neither. Being opt-in was not the same as being the official mechanism.
+What survives is the reason the command existed at all: the skill must travel *inside*
+the package, because a procedure shipped separately from the code it describes drifts
+from it. So `reportfast` prints and writes nothing, which two tests now hold: the
+module has no write path in it, and `skill show` leaves the bundle's files
+byte-for-byte as they were.
 
 **The validation gate** (`a529e0a`). `schema/` (2,400 generated lines),
 `derive_schema.py`, `contract.py`, `audit.py`, `shader.py`, `strict=`. See *What

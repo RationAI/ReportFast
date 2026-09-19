@@ -54,7 +54,9 @@ build-backend = "hatchling.build"
 packages = ["report_fast"]
 
 # The skill travels inside the wheel, as `report_fast/skill/`, so an installed
-# lib can print or install the procedure it ships (`reportfast skill show`).
+# library can print the procedure it ships (`reportfast skill show`). Printing is
+# all it does: Claude Code takes a skill from a committed `skills/` directory or as
+# a plugin, so there is nothing here for this package to install.
 # force-include rather than a copy step: one source of truth on disk --
 # skills/reportfast/ -- and the wheel is a projection of it, so the skill the
 # agent reads and the skill the tests check cannot disagree. An editable install

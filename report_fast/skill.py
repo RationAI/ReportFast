@@ -1,16 +1,17 @@
-"""The skill that ships inside the wheel, found and placed.
+"""The skill that ships inside the wheel, and how a reader reaches it.
 
-An installed library cannot install its own documentation. Packaging forbids a
-build or install hook from writing outside the environment — correctly, since the
-alternative is a package that edits your home directory during `uv add`. So the
-skill travels *inside* the package and one explicit command moves it where an
-agent looks. Nothing here happens unless someone runs that command.
+Two ways to read the same procedure, neither of them an install. In a checkout,
+`skills/reportfast/SKILL.md` is an ordinary file. With the library installed,
+`reportfast skill show` prints the file that travelled inside the wheel. Nothing
+here writes anything anywhere.
 
-Two layouts, one answer. A wheel install carries the skill at
-`report_fast/skill/` (a build-time projection of `skills/reportfast/`, see
-`pyproject.toml`'s force-include); an editable install has no such copy, so the
-checkout two directories up is checked too. An agent in either case is told the
-same thing: `reportfast skill show`.
+There used to be a third way — `reportfast skill install`, which copied the bundle
+into `~/.claude/skills` on request. It was deleted because Claude Code already has
+ways to take a skill: a project commits its `skills/` directory, or the skill is
+installed as a plugin. A library writing into a home directory is neither, and
+opt-in does not make it the official mechanism. What the library does have to do is
+carry its own documentation, because a procedure that ships separately from the code
+it describes drifts from it — hence the bundling below, and `skill show`.
 
 Why the file lives in one place: the procedure the agent follows and the code it
 describes must not drift. Copying a second `SKILL.md` into the package by hand would
@@ -20,20 +21,13 @@ two copies of one set of facts, and no check that keeps them together.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional
 
 #: Directory name the skill is known by, which is also the name Claude Code
 #: resolves when an agent asks for `/reportfast`.
 SKILL_NAME = "reportfast"
 SKILL_FILE = "SKILL.md"
-
-#: Where a personal install goes: read by every project on this machine.
-PERSONAL_DIR = Path.home() / ".claude" / "skills"
-#: Where a project install goes: read by that project alone, and committable, so
-#: `uv add report-fast` plus one command configures a fresh clone.
-PROJECT_DIR = Path(".claude") / "skills"
 
 
 class SkillError(RuntimeError):
@@ -50,7 +44,7 @@ def skill_dir() -> Path:
 
     Raises:
         SkillError: neither layout has it — a package built without the skill,
-            which says how to rebuild rather than falling back to a copy it does
+            which says to rebuild rather than falling back to a copy it does
             not have.
     """
     here = Path(__file__).resolve().parent
@@ -128,11 +122,11 @@ def bundled_roots() -> Dict[str, Optional[Path]]:
 def reference(name: str) -> str:
     """One bundled file by relative name: `references/xopat-v3.md`, `examples/x.json`.
 
-    The gate reads `report_fast/schema/`; this is how the *advice* and the example
-    sessions reach a reader who has an install and no checkout. Both spellings of
-    an example work — `examples/dysplasia_case.json` as `SKILL.md` writes it, and
-    the bare filename — because a name an agent has just read in a document should
-    work as typed.
+    This is how the *advice* and the example sessions reach a reader who has an
+    install and no checkout, without anyone copying a file into place first. Both
+    spellings of an example work — `examples/dysplasia_case.json` as `SKILL.md`
+    writes it, and the bare filename — because a name an agent has just read in a
+    document should work as typed.
 
     Raises:
         SkillError: the name escapes the bundle, or nothing in it has it. The
@@ -167,89 +161,14 @@ def reference(name: str) -> str:
     raise SkillError(f"the bundle has no {name}. It has: {', '.join(listed)}")
 
 
-def target_for(
-    dest: Optional[Union[str, Path]], *, project: bool = False
-) -> Path:
-    """Where `install` would put it: `--dest`, else the project, else personal.
-
-    Personal is the default because the question an agent asks — "how do I build a
-    report of these slides?" — is rarely about one repository, and because a
-    project install adds a directory that has to be gitignored or committed, which
-    is a decision about that repository, not about this package.
-    """
-    if dest is not None:
-        return Path(dest) / SKILL_NAME
-    base = PROJECT_DIR if project else PERSONAL_DIR
-    return base / SKILL_NAME
-
-
-def find_installed(dest: Optional[Union[str, Path]] = None, *, project: bool = False) -> List[Path]:
-    """Every copy of the skill an agent would currently be shown.
-
-    Both scopes are checked when no destination is given, because "is it
-    installed?" is asked after an agent failed to use it, and a stale copy in the
-    other scope is the usual answer.
-    """
-    if dest is not None or project:
-        candidates = [target_for(dest, project=True)]
-    else:
-        candidates = [target_for(None), target_for(None, project=True)]
-    return [path for path in candidates if (path / SKILL_FILE).is_file()]
-
-
-def install(
-    dest: Optional[Union[str, Path]] = None,
-    *,
-    project: bool = False,
-    force: bool = False,
-    link: bool = False,
-) -> Path:
-    """Put the bundled skill where Claude Code looks for it. Returns the path.
-
-    Args:
-        dest: Parent directory; defaults per :func:`target_for`.
-        project: Install into `./.claude/skills/` for this project only.
-        force: Replace an existing copy. Without it an existing install is an
-            error, because overwriting a skill silently is how a hand-edited
-            procedure disappears.
-        link: Symlink to the bundled files instead of copying — what you want in
-            this checkout, where edits to `skills/reportfast/` should be live
-            without reinstalling.
-
-    Raises:
-        SkillError: the bundle is missing, or something is already installed and
-            `force` was not given.
-    """
-    source = skill_dir()
-    target = target_for(dest, project=project)
-    if target.exists() and not force:
-        raise SkillError(
-            f"{target} already holds a skill. --force replaces it; check first if "
-            "anyone edited it, since this command overwrites what is there."
-        )
-    if target.is_symlink() or target.is_dir():
-        shutil.rmtree(target, ignore_errors=True)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if link:
-        target.symlink_to(source, target_is_directory=True)
-    else:
-        shutil.copytree(source, target, symlinks=True)
-    return target
-
-
 __all__ = [
     "SKILL_FILE",
     "SKILL_NAME",
-    "PERSONAL_DIR",
-    "PROJECT_DIR",
     "SkillError",
     "bundled_roots",
     "examples_dir",
-    "find_installed",
-    "install",
     "reference",
     "skill_dir",
     "skill_path",
     "skill_text",
-    "target_for",
 ]
