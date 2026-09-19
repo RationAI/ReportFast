@@ -150,6 +150,24 @@ plus `Section`, which groups blocks under a collapsible heading. `subtitle` and
 `preamble` are the whole prose budget of a page — one line under the title and one
 paragraph above the blocks.
 
+**What a card shows the reader.** The label under a card is `name`, and one line
+under that is `note` — that is the whole labelling surface, and both are per card:
+
+```python
+from report_fast import SlideGrid
+
+grid = SlideGrid(title="Grading")
+for case, grade in cases:                      # [("case_001", "low grade"), …]
+    grid.add(f"/mnt/data/colon/{case}.svs", name=case, note=grade)
+```
+
+`name` overrides the session's own; unset, the card shows `background[0].name`,
+which for a built session is the file stem. `SlideGrid(card={…})` sets the same
+keys for *every* card, so a per-case label goes through `add()` (or build the
+`SlideCard`s yourself and pass them as blocks) — `card={"name": …}` gives all 32
+cards one label, which is rarely what was meant. There is no table, no legend and
+no per-card metadata block: a label is a string you already have in the script.
+
 There used to be ten components, including `Prose`, `MetricTable`, `Chart` and a
 `RawHtml` escape hatch. They were deleted on purpose, and the reason is the reason
 they existed: reports written a month apart have to look like the same product,
