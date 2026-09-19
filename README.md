@@ -153,7 +153,6 @@ There used to be `skill install` and `skill where`; see *Reversals* in DESIGN.md
 | Session shape, `params`, the black-card checklist | `reportfast skill show --reference references/xopat-v3.md` |
 | Deployment coordinates, DataID construction, environment | `reportfast skill show --reference references/deployment.md` |
 | MLflow: artifacts, addresses, publishing | `reportfast skill show --reference references/mlflow.md` |
-| A v2 Hydra config mapped onto this library | `reportfast skill show --reference references/hydra-v2-to-v3.md` |
 | A real session to imitate | `reportfast skill show --reference examples/dysplasia_case.json` |
 | Why it is built this way, and what was ruled out | [DESIGN.md](DESIGN.md) |
 
