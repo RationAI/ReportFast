@@ -18,11 +18,13 @@ printf '%s\n' "$DATA_IDS" | xargs -P 8 -I{} -n1 sh -c \
 
 **Bound every probe, and run them together.** `curl` on an unreachable host waits
 its full default of 60 seconds, so one-at-a-time probing costs a minute per
-DataID. Measured here: four DataIDs took 240s unbounded and sequential, 5s bounded
-and parallel. This is why a large report can take the best part of an hour to
-build — not the HTML, the probing — and the answer is to make the probe cheap,
-never to skip it. A report whose links were never checked is exactly the report
-that says "works" and shows black cards.
+DataID. Measured here: four DataIDs took 241s unbounded and sequential, 5s bounded
+and parallel. On a 32-card report that is the difference between a step that
+finishes and one that gets skipped — and a skipped probe is a report that says
+"works" and shows black cards. (This is a cost that *can* explain an hour-long
+build on a machine that cannot reach the tile server; it is not confirmed as the
+cause of any particular slow report, since an older build's probe had its own
+10s timeout and an agent may have been doing other work between probes.)
 
 Three outcomes, and the third is the one most often misreported:
 

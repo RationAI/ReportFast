@@ -32,6 +32,14 @@ colours, the order and the layout, and unlike a spec file it can be re-run.
 
 Everything below is for the cases where the agent is not doing it.
 
+**Nothing here requires an agent, or one vendor over another.** The package is plain
+Python with one dependency, and the thing it asks for is a script. The skill is a
+markdown file with a `name` and a `description` at the top — readable by a human, by
+another agent, or by any tool that takes instructions from a file — and no code path
+in the library calls an agent or a model. What an agent buys is that the procedure in
+the skill gets applied consistently to a folder of slides; read the same file and
+write the script yourself, and the result is the same report.
+
 ## What the library provides
 
 - **The session object.** `XopatSession` holds the document the viewer boots from and

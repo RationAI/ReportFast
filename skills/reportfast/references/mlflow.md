@@ -4,6 +4,15 @@ Reading a run's artifacts into a report, and — only when asked — writing the
 back. The extra is `report-fast[mlflow]`; everything here is in
 `report_fast.mlflow`, whose single class `Mlflow` is the whole surface.
 
+**First ask whether MLflow is needed at all.** A report whose slides and masks come
+from folders needs no mlflow: `Drive` is a `Mask` source like `MlflowRun`, and a
+`case_matrix` over two `Drive` paths builds and renders in an environment where mlflow
+cannot even be imported. Verified on an interpreter with no mlflow: two cases, one mask
+row, page rendered. So a project pinned to mlflow 3 that reads its masks off a mount
+does not need a separate reporting environment — only a report that *reads a run*'s
+artifacts or publishes to one does, and then the cap below applies to that environment
+alone.
+
 ## Two addresses
 
 | | Address | Reachable from |

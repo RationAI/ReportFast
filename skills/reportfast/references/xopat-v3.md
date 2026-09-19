@@ -149,7 +149,16 @@ is a dict you write.
 4. **Tile root** — `/wsi-service/`; the viewer's `/v3/` is a different mount and
    answers image paths with nothing, which reads as a blank card.
 5. **Protocol** — a *registered name*, and the deployment default can actually
-   read the background's format (non-TIFF backgrounds are the usual miss).
+   read the background's format (non-TIFF backgrounds are the usual miss). A slide
+   whose pyramid levels do not step by the factor the default reader assumes is the
+   other way this bites: the background loads and the image is wrong or blank rather
+   than erroring. The fix is the same one the v2 tool used — name a different
+   registered protocol for the background: `XopatEndpoint(image_protocol="…")`,
+   `XOPAT_IMAGE_PROTOCOL`, or `protocol=` on `from_slide`. Which names exist is a
+   fact about that deployment's `env.json` (`slide_protocols`), not about this
+   library; `wsi_service` is the one registered on the cluster deployment. There is
+   no way to list them from a script, and no way to check the choice short of
+   opening the page.
 6. **`/v3/slides/info?slide_id=<DataID>`** — the viewer's own first request;
    probe it rather than reasoning about it.
 7. **Overlay missing while the background shows** — `dataReferences` spelled
