@@ -21,10 +21,10 @@ its full default of 60 seconds, so one-at-a-time probing costs a minute per
 DataID. Measured here: four DataIDs took 241s unbounded and sequential, 5s bounded
 and parallel. On a 32-card report that is the difference between a step that
 finishes and one that gets skipped — and a skipped probe is a report that says
-"works" and shows black cards. (This is a cost that *can* explain an hour-long
-build on a machine that cannot reach the tile server; it is not confirmed as the
-cause of any particular slow report, since an older build's probe had its own
-10s timeout and an agent may have been doing other work between probes.)
+"works" and shows black cards. Between `e705d7e` and today the skill offered only
+an unbounded curl: the build-time probe that carried its own 10s timeout was
+deleted in that commit and nothing bounded the replacement, so a report of any
+size on an unreachable host cost about a minute per DataID.
 
 Three outcomes, and the third is the one most often misreported:
 
