@@ -37,7 +37,6 @@ from report_fast.session import (  # noqa: E402
 from report_fast.xopat import (  # noqa: E402
     XopatEndpoint,
     XopatError,
-    build_session,
     viewer_url,
 )
 
@@ -274,21 +273,6 @@ def test_from_url_without_a_session_says_so():
 
 
 # ── building ────────────────────────────────────────────────────────────────
-
-
-def test_from_slide_matches_build_session():
-    session = XopatSession.from_slide(
-        SLIDE,
-        [{"path": OVERLAY, "type": "heatmap", "name": "Probability"}],
-        name="Slide 1",
-        endpoint=endpoint(),
-    )
-    assert session.to_config() == build_session(
-        SLIDE,
-        [{"path": OVERLAY, "type": "heatmap", "name": "Probability"}],
-        name="Slide 1",
-        endpoint=endpoint(),
-    )
 
 
 def test_builtin_defaults_emit_no_params():

@@ -26,12 +26,12 @@ from contextlib import contextmanager
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+from report_fast.session import XopatSession  # noqa: E402
 from report_fast.xopat import (  # noqa: E402
     DEFAULT_BASE_URL,
     DEFAULT_WSI_BASE_URL,
     XopatEndpoint,
     XopatError,
-    build_session,
     mount_path,
     session_fragment,
     thumbnail_url,
@@ -88,7 +88,9 @@ def test_empty_mount_root_keeps_absolute_data_ids():
     # path (`/data/Public/.../O16-11870.tiff`), which protocols templating a
     # whole path need preserved.
     assert mount_path("/data/Public/slide.tiff", "") == "/data/Public/slide.tiff"
-    session = build_session("/data/Public/slide.tiff", endpoint=endpoint(mount_root=""))
+    session = XopatSession.from_slide(
+        "/data/Public/slide.tiff", endpoint=endpoint(mount_root=""),
+    ).to_config()
     assert session["data"] == ["/data/Public/slide.tiff"]
 
 
@@ -104,7 +106,9 @@ def test_thumbnail_url_shape():
 
 
 def test_minimal_session_matches_viewer_shape():
-    session = build_session(SLIDE, name="Slide 1", endpoint=endpoint())
+    session = XopatSession.from_slide(
+        SLIDE, name="Slide 1", endpoint=endpoint(),
+    ).to_config()
     assert session["params"] == {}
     assert session["data"] == ["data/slides/slide_001.tif"]
     assert session["background"] == [
@@ -121,7 +125,7 @@ def test_minimal_session_matches_viewer_shape():
 
 
 def test_layers_bind_with_plural_data_references():
-    session = build_session(
+    session = XopatSession.from_slide(
         SLIDE,
         layers=[
             {"path": OVERLAY, "type": "heatmap", "name": "Prob"},
@@ -129,7 +133,7 @@ def test_layers_bind_with_plural_data_references():
         ],
         endpoint=endpoint(),
         lossless=False,
-    )
+    ).to_config()
     shaders = session["visualizations"][0]["shaders"]
     assert list(shaders) == ["layer_shader_0", "layer_shader_1"]
     assert session["data"] == [
@@ -147,9 +151,9 @@ def test_layers_bind_with_plural_data_references():
 def test_overlay_data_asks_for_lossless_tiles_by_default():
     # v2 asked for this with `visualizations[].lossless`; v3 spells it per data
     # entry, and the background keeps the deployment default.
-    session = build_session(
+    session = XopatSession.from_slide(
         SLIDE, layers=[{"path": OVERLAY, "type": "heatmap"}], endpoint=endpoint()
-    )
+    ).to_config()
     assert session["data"] == [
         "data/slides/slide_001.tif",
         {"dataID": "data/predictions/prob_001.tif", "options": {"format": "png"}},
@@ -160,12 +164,12 @@ def test_overlay_data_asks_for_lossless_tiles_by_default():
 
 
 def test_lossless_can_be_turned_off():
-    session = build_session(
+    session = XopatSession.from_slide(
         SLIDE,
         layers=[{"path": OVERLAY, "type": "heatmap"}],
         endpoint=endpoint(),
         lossless=False,
-    )
+    ).to_config()
     assert session["data"] == [
         "data/slides/slide_001.tif",
         "data/predictions/prob_001.tif",
@@ -187,7 +191,9 @@ def test_legacy_shader_conf_still_binds():
             "max": 255,
         }
     }
-    session = build_session(SLIDE, layers=[v2_layer], endpoint=endpoint())
+    session = XopatSession.from_slide(
+        SLIDE, layers=[v2_layer], endpoint=endpoint(),
+    ).to_config()
     layer = session["visualizations"][0]["shaders"]["layer_shader_0"]
     params = layer["params"]
     assert layer["type"] == "heatmap"
@@ -210,13 +216,15 @@ def test_finished_layer_is_emitted_verbatim():
         "visible": 1,
         "fixed": False,
     }
-    session = build_session(SLIDE, layers=[custom], endpoint=endpoint())
+    session = XopatSession.from_slide(
+        SLIDE, layers=[custom], endpoint=endpoint(),
+    ).to_config()
     assert session["data"] == ["data/slides/slide_001.tif"]
     assert session["visualizations"][0]["shaders"]["layer_shader_0"] == custom
 
 
 def test_group_layer_carries_members():
-    session = build_session(
+    session = XopatSession.from_slide(
         SLIDE,
         layers=[
             {
@@ -228,7 +236,7 @@ def test_group_layer_carries_members():
             }
         ],
         endpoint=endpoint(),
-    )
+    ).to_config()
     layer = session["visualizations"][0]["shaders"]["layer_shader_0"]
     assert layer["shaders"] == {"a": {"type": "heatmap"}}
     assert layer["order"] == ["a"]
@@ -237,7 +245,9 @@ def test_group_layer_carries_members():
 def test_a_bare_mask_path_is_already_a_layer():
     # `masks=["/mnt/data/mask.tif"]` is the out-of-the-box spelling for a mask,
     # so a bare path must not be rejected; its stem labels the layer.
-    session = build_session(SLIDE, layers=["/mnt/data/mask.tif"], endpoint=endpoint())
+    session = XopatSession.from_slide(
+        SLIDE, layers=["/mnt/data/mask.tif"], endpoint=endpoint(),
+    ).to_config()
     layers = list(session["visualizations"][0]["shaders"].values())
     assert [layer["name"] for layer in layers] == ["mask"]
     assert [layer["type"] for layer in layers] == ["heatmap"]
@@ -245,11 +255,13 @@ def test_a_bare_mask_path_is_already_a_layer():
 
 def test_layer_without_path_is_rejected():
     with raises(XopatError):
-        build_session(SLIDE, layers=[{"type": "heatmap"}], endpoint=endpoint())
+        XopatSession.from_slide(
+            SLIDE, layers=[{"type": "heatmap"}], endpoint=endpoint(),
+        ).to_config()
 
 
 def test_declared_params_survive_including_channel_override():
-    session = build_session(
+    session = XopatSession.from_slide(
         SLIDE,
         layers=[
             {
@@ -259,7 +271,7 @@ def test_declared_params_survive_including_channel_override():
             }
         ],
         endpoint=endpoint(),
-    )
+    ).to_config()
     params = session["visualizations"][0]["shaders"]["layer_shader_0"]["params"]
     assert params == {"use_channel0": "g", "threshold": 2, "inverse": True}
 
@@ -267,14 +279,16 @@ def test_declared_params_survive_including_channel_override():
 def test_non_tiff_background_needs_a_registered_protocol_name():
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        session = build_session("/mnt/data/slide.png", endpoint=endpoint())
+        session = XopatSession.from_slide(
+            "/mnt/data/slide.png", endpoint=endpoint(),
+        ).to_config()
     assert session["data"][0] == "data/slide.png"
     assert "protocol" not in session["background"][0]
     assert any("XOPAT_IMAGE_PROTOCOL" in str(w.message) for w in caught)
 
-    session = build_session(
+    session = XopatSession.from_slide(
         "/mnt/data/slide.png", endpoint=endpoint(image_protocol="my_images")
-    )
+    ).to_config()
     # v3 deprecated `background[].protocol`; the DataOverride owns it now.
     assert session["data"][0] == {"dataID": "data/slide.png", "protocol": "my_images"}
     assert session["background"][0]["dataReference"] == 0
@@ -283,7 +297,9 @@ def test_non_tiff_background_needs_a_registered_protocol_name():
 def test_configured_protocol_covers_tiff_too():
     # A viewer-exported session carries a protocol on its `.tiff` entries, so an
     # explicitly configured one is not filtered by extension.
-    session = build_session(SLIDE, endpoint=endpoint(image_protocol="iipimage"))
+    session = XopatSession.from_slide(
+        SLIDE, endpoint=endpoint(image_protocol="iipimage"),
+    ).to_config()
     assert session["data"][0] == {
         "dataID": "data/slides/slide_001.tif",
         "protocol": "iipimage",
@@ -292,17 +308,19 @@ def test_configured_protocol_covers_tiff_too():
 
 def test_inline_js_protocol_is_refused():
     with raises(XopatError):
-        build_session(
+        XopatSession.from_slide(
             "/mnt/data/slide.png",
             endpoint=endpoint(image_protocol="`^({type:'image',url:`${x}`})`"),
-        )
+        ).to_config()
 
 
 # ── viewer URL ──────────────────────────────────────────────────────────────
 
 
 def test_viewer_url_roundtrips_and_stays_in_the_fragment():
-    session = build_session(SLIDE, name="Slide 1", endpoint=endpoint())
+    session = XopatSession.from_slide(
+        SLIDE, name="Slide 1", endpoint=endpoint(),
+    ).to_config()
     url = viewer_url(session, endpoint())
     assert url.startswith(BASE.rstrip("/") + "/#%7B")
     assert "?" not in url
@@ -360,3 +378,32 @@ def test_endpoint_reads_environment():
         for key in [k for k in os.environ if k.startswith("XOPAT_")]:
             os.environ.pop(key)
         os.environ.update(saved)
+
+
+def main() -> int:
+    # This file's docstring has said `Run: python tests/test_xopat.py` since it was
+    # written, and until now the file had no `__main__` block, so that command ran
+    # 22 tests' worth of imports and then exited 0 without calling one of them --
+    # a green run that measured nothing. Every other file here has the runner.
+    tests = [
+        (name, obj)
+        for name, obj in sorted(globals().items())
+        if name.startswith("test_") and callable(obj)
+    ]
+    failed = 0
+    for name, test in tests:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                test()
+        except Exception as exc:  # noqa: BLE001 - the runner reports, it does not handle
+            failed += 1
+            print(f"FAIL {name}: {type(exc).__name__}: {exc}")
+        else:
+            print(f"ok   {name}")
+    print(f"\n{len(tests) - failed}/{len(tests)} passed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

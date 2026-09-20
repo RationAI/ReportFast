@@ -303,6 +303,38 @@ def test_every_rule_ci_claims_in_a_comment_is_a_test_that_exists():
     assert not missing, f"CI cites tests that do not exist: {missing}"
 
 
+def test_every_test_file_can_be_run_the_way_it_says_to():
+    """Every test file runs standalone, because a file that cannot is a file that lies.
+
+    `test_xopat.py` carried `Run: python tests/test_xopat.py` from the day it was
+    written and had no `__main__` block, so that command imported the module and
+    exited 0 having called none of its 22 tests. pytest collected the file fine, so
+    CI stayed green and the claim stayed false; what noticed was an edit to that
+    file with no way to check the edit. An unrun test and a passing test look
+    identical, so the shape is what gets checked, and it is checked on every file
+    rather than only on the ones whose docstring promises it -- the promise being
+    the part that was wrong.
+    """
+    files = sorted((ROOT / "tests").glob("test_*.py"))
+    assert len(files) >= 9, f"the glob found {len(files)} test files; it should not be this small"
+    offenders = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        # Either shape is a runner: dispatch over the `test_` prefix, or hand the
+        # file to pytest. What is not a runner is a `__main__` that calls nothing,
+        # and what is not acceptable is a list of test names that silently stops
+        # listing the tests added after it.
+        dispatches = "__main__" in text and (
+            'startswith("test_")' in text or "pytest.main" in text
+        )
+        declared = len(re.findall(r"^def test_", text, flags=re.M))
+        if not dispatches:
+            offenders.append(f"{path.name}: no runner")
+        elif declared == 0:
+            offenders.append(f"{path.name}: a runner and no tests to run")
+    assert not offenders, f"unrunnable test files: {offenders}"
+
+
 def test_the_package_imports_without_the_optional_extras():
     """`report_fast` alone renders. mlflow is an extra, and so is the renderer.
 

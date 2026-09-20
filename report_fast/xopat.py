@@ -51,7 +51,7 @@ import urllib.parse
 import warnings
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, Mapping, Optional, Sequence, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 from .layer import DEFAULT_LAYER_TYPE
 
@@ -321,53 +321,6 @@ def shader_layer(spec: Mapping[str, Any], data_index: int) -> Dict[str, Any]:
     return layer
 
 
-def build_session(
-    slide: Union[str, Path],
-    layers: Sequence[Any] = (),
-    name: Optional[str] = None,
-    params: Optional[Mapping[str, Any]] = None,
-    endpoint: Optional[XopatEndpoint] = None,
-    visualization_name: Optional[str] = None,
-    lossless: bool = True,
-) -> Dict[str, Any]:
-    """Build a v3 session dict that opens `slide` with optional overlay layers.
-
-    Args:
-        slide: Background slide, absolute path or DataID.
-        layers: Overlay layers. Each is a mapping (`path`, `type`, `name`,
-            `params`, optional `visible`/`fixed`; the v2 `shader_conf` wrapper is
-            accepted). A mapping that already carries `dataReferences` is
-            emitted verbatim.
-        name: Display name for the background in the viewer.
-        params: Viewer `params` overrides, kept as written.
-        endpoint: Deployment coordinates; defaults to `DEFAULT_ENDPOINT`.
-        visualization_name: Display name for the visualization.
-        lossless: Ask the tile server for lossless overlay tiles, the v3 form of
-            v2's `visualizations[].lossless`. Lossy tiles shift the colours of a
-            class map, so this is on by default; pass False to accept the
-            deployment default. The background keeps the default either way.
-
-    Returns:
-        A session dict ready for `viewer_url()`.
-
-    Deprecated:
-        `report_fast.session.XopatSession` is the object now -- it builds the
-        same session, accepts one someone else wrote, and renders itself to a
-        link. This wrapper stays for a release so existing calls keep working.
-    """
-    from .session import XopatSession
-
-    return XopatSession.from_slide(
-        slide,
-        layers,
-        name=name,
-        params=params,
-        endpoint=endpoint,
-        visualization_name=visualization_name,
-        lossless=lossless,
-    ).to_config()
-
-
 def viewer_url(
     session: Mapping[str, Any], endpoint: Optional[XopatEndpoint] = None
 ) -> str:
@@ -404,7 +357,6 @@ __all__ = [
     "background_protocol",
     "normalise_layer",
     "shader_layer",
-    "build_session",
     "viewer_url",
     "session_fragment",
 ]

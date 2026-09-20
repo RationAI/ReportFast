@@ -230,6 +230,34 @@ goes through `getattr` and binds the descriptor. Both branches were checked by
 reintroducing the regression, and the first attempt at that check passed silently, which
 is how this was caught.
 
+**The wrapper that was keeping nobody.** `build_session` returned `from_slide(...).to_config()`
+and its own docstring said it "stays for a release so existing calls keep working". There
+is no release: no tag, nothing pushed, and the skill, the four references and the README
+never mention the name — the same tell that ended `SessionPreset`. A deprecated alias is a
+promise to a caller who exists; this one promised a release that had not happened to a
+caller who had not been told. All 17 call sites were in `tests/`, using it as a fixture
+constructor, which is what made the deletion cheap rather than what made it right.
+
+What replaced it is `XopatSession.from_slide(...).to_config()` — the same call, one method
+longer, with nothing lost, since the wrapper accepted no argument `from_slide` does not.
+`test_from_slide_matches_build_session` could not survive this and was deleted rather than
+rewritten: rewritten mechanically it asserts `x == x`, which is the failure mode worth
+naming, because a green tautology is indistinguishable from a passing test in every tool
+that runs tests. It was caught here only because the rewrite was read back.
+
+Deleting it also exposed the gap in this file's own testing that *The test file that ran
+nothing* records, since the file affected was the one with no runner.
+
+**The test file that ran nothing.** `tests/test_xopat.py` has said `Run: python
+tests/test_xopat.py` in its docstring since it was written and had no `__main__` block, so
+that command imported the module, ran none of its 22 tests, and exited 0. pytest collects
+the file correctly, which is why CI was never wrong and why the docstring was. Found while
+deleting the wrapper above — the file was edited and there was no way to check the edit
+with the command its own header gives. It has the same runner the other eight files have
+now, and it passed 22/22 the first time its documented command actually executed it, which
+is the reason this is a note rather than a bug: an unrun test is not a failing test, and
+nothing in the suite can tell the difference.
+
 **The provenance sidecar** (`e705d7e`). `report.provenance.json` beside every report:
 endpoint, viewer stamp, inputs, every DataID, the design as authored. It answered a
 question the manifest had created. Once the report is a script, the script answers it
