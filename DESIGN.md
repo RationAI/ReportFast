@@ -381,6 +381,12 @@ they are the ones worth reading before changing anything:
   vacuous in the specific way such a check usually is (`callable()` is False for a raw
   `classmethod`, so a resolver's methods read as absent). See *The orphan the same
   deletion left behind*.
+- `test_the_skill_never_fetches_a_ref_that_does_not_exist` — the reference tells an
+  agent to fetch the layer-type list from upstream, and that repo's default branch is
+  `master`. Spelled with `main` the URL returns a 404 *body*, `grep` matches none of
+  it, and the pipeline prints zero names: a fetch that fails by answering "none",
+  which is the one failure mode a timeout does not catch. Written while measuring the
+  fetch it guards, and fired on an injected `main` URL before it was committed.
 - `test_no_workflow_publishes` — greps the workflow files. A publish step is what a
   helpful person adds while trying to be useful, and it would pass review, pass tests,
   and upload. Comments are stripped first: the workflow that must not publish is the

@@ -116,10 +116,38 @@ that is not what you wrote. The message goes to the browser console, which the
 reader of a report never opens.
 
 The library passes `type` through without checking it, deliberately — a registry
-here would be a second source of truth about a viewer it does not run. So read
-the registrations in `flex-renderer.js` (`ShaderLayerRegistry.register` +
-`static type()`) rather than trusting this page. At 3.1.0 the registered names
-were:
+here would be a second source of truth about a viewer it does not run. So the
+list below is a convenience, and this is how you check it instead of trusting
+this page:
+
+```bash
+RAW=https://raw.githubusercontent.com/RationAI/xopat/18c94f2b1991380e703e44366552e48faca62cd0
+curl -s --max-time 20 "$RAW/src/libs/flex-renderer/flex-renderer.js" \
+  | grep -A2 "static type()" | grep -o 'return "[^"]*"' \
+  | sed 's/return "//;s/"//' | sort -u
+```
+
+Twenty names, in 0.1 seconds. Two traps make the obvious version of this fail,
+and one of them fails quietly:
+
+- **`main` is 404.** The default branch of that repo is `master`; `dev/v3` is
+  where v3 work lands. A URL spelled with `main` for a repo with no `main`
+  returns a 404 body, which a shell pipeline happily forwards to `grep` and
+  reports as *zero registered layer types*. Pin a commit SHA, as above.
+- **Do not read that file with a page fetcher.** `flex-renderer.js` is 1.3 MB,
+  a fetcher truncates it, and it answers the question with *two* of the twenty
+  names — `identity` and `group` — with no error and no hint that it stopped.
+  A truncated read looks exactly like a short registry. Only a pipeline over
+  the whole body is a read you can trust.
+
+The recipe greps `static type()` rather than the `register(` calls because the
+registrations are spelled eight different ways — anonymous class expressions,
+named classes, a multi-line call — while every layer states its own name in one
+place. It finds 21 definitions and prints 20 names: the extra one is
+`ShaderLayer` itself, whose `type()` is `throw "must be implemented"`, which is
+a missing name rather than a wrong one.
+
+At 3.1.0 the registered names are:
 
 ```
 adaptive_threshold  bipolar-heatmap  colormap  edge  fisheye-lens  grid

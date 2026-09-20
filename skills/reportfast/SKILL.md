@@ -39,7 +39,9 @@ can contain, read the viewer:
 - `https://github.com/RationAI/xopat` — `src/types/app.d.ts` is the session
   document (`src/types/session.d.ts` is **not** — that one is live collaboration,
   and it is named to mislead). `src/parse-input.js` is what a link goes through.
-  `src/libs/flex-renderer/flex-renderer.js` is where layer types are registered.
+  `src/libs/flex-renderer/flex-renderer.js` is where layer types are registered —
+  over the network that path is `master` or a pinned SHA, never `main`, and the
+  recipe is in `references/xopat-v3.md`.
 - `https://xopat.org/api/` is marked "Coming Soon". It is not a source.
 
 **Version stamp: this library was written against xOpat 3.1.0, commit

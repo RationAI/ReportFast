@@ -373,6 +373,22 @@ def test_every_curl_the_skill_teaches_is_bounded():
             )
 
 
+def test_the_skill_never_fetches_a_ref_that_does_not_exist():
+    """A 404 body through a pipeline reads as *zero results*, not as an error.
+
+    `RationAI/xopat` has no `main` -- the default branch is `master`. So a raw
+    URL spelled with `main` returns `404: Not Found`, `grep` matches none of
+    it, and `sort -u` prints nothing: an agent following the recipe concludes
+    the viewer registers no layer types at all and writes a report around that.
+    A fetch that fails by returning a shorter answer is the failure a bound on
+    the timeout does not catch, so it is checked here instead, against the one
+    ref known to be wrong.
+    """
+    for name, text in _bundled_docs().items():
+        for url in re.findall(r"raw\.githubusercontent\.com/[^\"'\s]+", text):
+            assert "/main/" not in url + "/", f"{name} fetches {url}; that repo has no main"
+
+
 def _bundled_docs() -> dict:
     """Every markdown file the skill ships, by name -- SKILL.md and the references."""
     found = {"SKILL.md": skill_module.skill_dir() / "SKILL.md"}
