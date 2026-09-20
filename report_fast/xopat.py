@@ -252,7 +252,8 @@ def data_entry(
     override: Dict[str, Any] = {}
     if protocol:
         # Checked here rather than in `background_protocol()` so a protocol name
-        # from any source -- endpoint, preset, explicit argument -- is refused.
+        # from any source -- the endpoint's `image_protocol` or an explicit
+        # argument -- is refused.
         _reject_inline_protocol(protocol)
         override["protocol"] = protocol
     merged_options = dict(options or {})

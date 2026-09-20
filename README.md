@@ -175,8 +175,8 @@ There used to be `skill install` and `skill where`; see *Reversals* in DESIGN.md
 
 ## Repository layout and tests
 
-`report_fast/` splits into the wire format (`xopat.py`, `session.py`, `layer.py`,
-`config.py`), rendering (`core.py`, `components/`), and the edges (`masks.py`,
+`report_fast/` splits into the wire format (`xopat.py`, `session.py`, `layer.py`),
+rendering (`core.py`, `components/`), and the edges (`masks.py`,
 `mlflow.py`, `skill.py`, `__main__.py`). Nothing here copies the viewer's vocabulary:
 `layer.py` is the one file naming a shader type, and everything else about the viewer
 comes from its own source — see `test_there_is_no_copy_of_the_viewer_vocabulary`.

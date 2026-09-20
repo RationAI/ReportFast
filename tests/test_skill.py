@@ -65,8 +65,7 @@ def test_the_wheel_target_matches_where_the_code_looks():
     the install does not, and only someone in another project finds out.
     """
     # `tomllib` is 3.11+; the package supports 3.10, where this one check cannot
-    # run (and `config.py` says so out loud for TOML presets for the same reason).
-    # Skipped rather than dropped: the 3.12 leg of CI still runs it, and the
+    # run. Skipped rather than dropped: the 3.12 leg of CI still runs it, and the
     # failure it prevents -- an install that silently ships no skill -- is silent
     # only on a machine someone else is using.
     try:

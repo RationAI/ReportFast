@@ -44,7 +44,6 @@ from typing import (
     Union,
 )
 
-from .config import SessionPreset, deep_merge, resolve_preset
 from .xopat import (
     DEFAULT_THUMBNAIL_SIZE,
     XopatEndpoint,
@@ -59,6 +58,25 @@ from .xopat import (
     thumbnail_url,
     viewer_url,
 )
+
+def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+    """Recursively merge `override` onto `base`.
+
+    Only dicts merge; everything else (including lists) is replaced, because a
+    session's lists are positional and a half-inherited list is a silent bug.
+    This is the session's own rule, not a generic utility -- which is why it
+    lives here and not in a config module.
+    """
+    merged: Dict[str, Any] = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        merged[key] = (
+            _deep_merge(current, value)
+            if isinstance(current, Mapping) and isinstance(value, Mapping)
+            else value
+        )
+    return merged
+
 
 #: `params` that record *where the author was looking* rather than what a report
 #: should show. Dropped on import by default so a pasted config cannot dictate
@@ -594,40 +612,36 @@ class XopatSession:
         plugins: Optional[Mapping[str, Any]] = None,
         endpoint: Optional[XopatEndpoint] = None,
         visualization_name: Optional[str] = None,
-        lossless: Optional[bool] = None,
+        lossless: bool = True,
         protocol: Optional[str] = None,
         options: Optional[Mapping[str, Any]] = None,
-        preset: Optional[SessionPreset] = None,
     ) -> "XopatSession":
         """Build the common session: one background plus its overlay layers.
+
+        Every default is an argument here. There is no layer of preset defaults
+        underneath: the session says in its own call what it was built with,
+        which is what makes a report re-runnable by reading its script.
 
         Args:
             slide: Background slide, absolute path or DataID. The report host
                 never needs to read it -- the image server resolves it.
-            layers: Overlay layers (`ShaderConfig` or mappings). Unset falls
-                back to the preset's default layers.
+            layers: Overlay layers (`ShaderConfig` or mappings).
             name: Background label shown in the viewer. Defaults to the file stem.
-            params: Session `params`, merged over the preset's and checked
-                against the viewer's allowlist.
-            endpoint: Deployment coordinates; unset uses the preset's, else the
-                environment default.
-            lossless: Lossless overlay tiles; unset takes the preset's.
-            protocol: Slide-protocol name for the background. Unset leaves the
-                deployment's `default_background_protocol`, and a preset's value
-                wins over the endpoint's.
-            preset: A `SessionPreset` of defaults to merge under everything, or
-                `None` for the builtin. It is an object, not a file: this
-                library reads no session defaults from disk.
+            params: Session `params`, kept exactly as given -- the viewer's
+                `sanitizeAgainst` is the only thing that judges them.
+            plugins: Plugin id -> config, for a deployment that loads plugins.
+            endpoint: Deployment coordinates; unset uses the environment default.
+            visualization_name: Label for the overlay set; defaults to `name`.
+            lossless: Lossless (`png`) overlay tiles, so class-map colours
+                survive tiling. Backgrounds keep the deployment default.
+            protocol: Slide-protocol name for the background. Unset takes the
+                endpoint's `image_protocol`, then the deployment default.
+            options: `DataOverride.options` for the background's data entry.
 
         Returns:
             A session that renders as one viewer tab per call.
         """
-        configuration = resolve_preset(preset)
-        session = cls(
-            params=deep_merge(configuration.params, params or {}),
-            plugins=deep_merge(configuration.plugins, plugins or {}),
-            endpoint=endpoint or configuration.endpoint,
-        )
+        session = cls(params=params, plugins=plugins, endpoint=endpoint)
         target = session.endpoint_for()
         background_id = mount_path(slide, target.mount_root)
         session.add_visualization(
@@ -637,19 +651,12 @@ class XopatSession:
             slide,
             name=name,
             visualization_index=0,
-            protocol=protocol
-            if protocol is not None
-            else (configuration.protocol or target.image_protocol),
-            options=options if options is not None else configuration.options,
+            protocol=protocol if protocol is not None else target.image_protocol,
+            options=options,
             endpoint=target,
         )
-        for layer in layers or configuration.layers:
-            session.add_layer(
-                layer,
-                visualization=0,
-                lossless=configuration.lossless if lossless is None else lossless,
-                endpoint=target,
-            )
+        for layer in layers:
+            session.add_layer(layer, visualization=0, lossless=lossless, endpoint=target)
         return session
 
     @classmethod
@@ -864,7 +871,7 @@ class SessionTemplate:
         if name:
             bound.bind_name(name)
         if params:
-            bound.params = deep_merge(bound.params, params)
+            bound.params = _deep_merge(bound.params, params)
         return bound
 
 
@@ -887,7 +894,6 @@ def sessions_from_paths(
     names: Optional[Callable[[Slide], str]] = None,
     params: Optional[Mapping[str, Any]] = None,
     endpoint: Optional[XopatEndpoint] = None,
-    preset: Optional[SessionPreset] = None,
 ) -> List[XopatSession]:
     """One session per slide, from paths.
 
@@ -923,7 +929,6 @@ def sessions_from_paths(
                 name=label,
                 params=params,
                 endpoint=endpoint,
-                preset=preset,
             )
         sessions.append(session)
     return sessions
@@ -941,7 +946,6 @@ def sessions_from_folder(
     names: Optional[Callable[[Slide], str]] = None,
     params: Optional[Mapping[str, Any]] = None,
     endpoint: Optional[XopatEndpoint] = None,
-    preset: Optional[SessionPreset] = None,
     sort: Optional[Callable[[Path], Tuple]] = lambda path: path.name,
 ) -> List[XopatSession]:
     """One session per slide found in `directory`.
@@ -951,7 +955,7 @@ def sessions_from_folder(
             silently empty report.
         patterns: Glob patterns to accept, e.g. `"*.tif"` or a sequence.
         recursive: Descend into subfolders.
-        layers/masks/layers_for/template/names/params/endpoint/preset:
+        layers/masks/layers_for/template/names/params/endpoint:
             As `sessions_from_paths`.
         sort: Order key; `None` keeps the filesystem order.
     """
@@ -981,7 +985,6 @@ def sessions_from_folder(
         names=names,
         params=params,
         endpoint=endpoint,
-        preset=preset,
     )
 
 
@@ -992,7 +995,6 @@ def as_session(
     name: Optional[str] = None,
     params: Optional[Mapping[str, Any]] = None,
     endpoint: Optional[XopatEndpoint] = None,
-    preset: Optional[SessionPreset] = None,
 ) -> XopatSession:
     """Coerce anything session-shaped into a session.
 
@@ -1007,39 +1009,35 @@ def as_session(
     * existing ``.json`` file -- :meth:`XopatSession.from_file`.
     * anything else -- a path to a background, with `layers` over it.
 
-    `layers`, `params` and the preset apply only on the last branch: a session
-    that arrived already built is left as its author built it, which is the
-    whole point of the paste path.
+    `layers` and `params` apply only on the last branch: a session that arrived
+    already built is left as its author built it, which is the whole point of the
+    paste path.
     """
-    configuration = resolve_preset(preset)
-    target = endpoint or configuration.endpoint
-
     if isinstance(source, XopatSession):
         session = source.copy()
-        session.endpoint = target or session.endpoint
+        session.endpoint = endpoint or session.endpoint
     elif isinstance(source, SessionTemplate):
         session = (
             source.bind(name=name, partial=True) if name else source.session.copy()
         )
-        session.endpoint = target or session.endpoint
+        session.endpoint = endpoint or session.endpoint
     elif isinstance(source, Mapping):
-        session = XopatSession.from_config(source, endpoint=target)
+        session = XopatSession.from_config(source, endpoint=endpoint)
     elif isinstance(source, str):
         text = source.strip()
         if text.lower().startswith(("http://", "https://")):
-            session = XopatSession.from_url(text, endpoint=target)
+            session = XopatSession.from_url(text, endpoint=endpoint)
         elif text.startswith("{"):  # session JSON pasted as text
-            session = XopatSession.from_config(text, endpoint=target)
+            session = XopatSession.from_config(text, endpoint=endpoint)
         elif Path(text).suffix.lower() == ".json" and Path(text).exists():
-            session = XopatSession.from_file(text, endpoint=target)
+            session = XopatSession.from_file(text, endpoint=endpoint)
         else:
             return XopatSession.from_slide(
                 source,
                 layers,
                 name=name,
                 params=params,
-                endpoint=target,
-                preset=configuration,
+                endpoint=endpoint,
             )
     else:
         return XopatSession.from_slide(
@@ -1047,12 +1045,11 @@ def as_session(
             layers,
             name=name,
             params=params,
-            endpoint=target,
-            preset=configuration,
+            endpoint=endpoint,
         )
 
     if params:
-        session.params = deep_merge(session.params, params)
+        session.params = _deep_merge(session.params, params)
     if name:
         session.bind_name(name)
     return session

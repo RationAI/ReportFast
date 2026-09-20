@@ -111,7 +111,7 @@ below the table rather than quietly rewriting it.
 | --- | --- | --- |
 | 1 | Does a session render itself, or is it config + a card? | Both: the session is a value object, `SlideCard(session=…)` renders it |
 | 2 | How does a 300-case grid avoid typing 300 documents? | **The script loops.** `from_slide()`/`case_matrix()` per case; `SessionTemplate.bind()` when a hand-authored shape needs refilling |
-| 3 | What shape do the defaults take? | `SessionPreset`, built in code, overridable per call. ~~A preset **file**~~ — see reversals |
+| 3 | What shape do the defaults take? | **The call's own arguments.** No preset, no preset file — both were a second way to set what the call sets; see reversals |
 | 4 | Static file or served app? | **Static only.** No server, no state, no re-render |
 | 5 | Where do masks come from? | A `Mask` names a layer and carries its own **source** — `Drive` folder or `MlflowRun` artifacts — so the call reads like the job |
 | 6 | Does the agent write the report, the code, or the manifest? | **The code.** The manifest is gone; the script is the interface and the record |
@@ -148,18 +148,36 @@ from it. So `reportfast` prints and writes nothing, which two tests now hold: th
 module has no write path in it, and `skill show` leaves the bundle's files
 byte-for-byte as they were.
 
-**The preset file.** `load_preset` read JSON or TOML from `$XOPAT_SESSION_CONFIG` and
-merged it under every session, and `parse_preset` validated the document against
-`FORBIDDEN_KEYS` and `PRESET_KEYS`. It contradicted *Not doing*, was documented
-nowhere a reader could see, and was strictly less expressive than the script it was
-supposed to simplify: `params`, `plugins`, `layers`, `protocol`, `options`,
-`lossless` and four endpoint fields, each also settable by passing a `SessionPreset`,
-an `XopatEndpoint` or a `Report(theme=…)`. An environment variable nobody typed could
-change a report's numbers, invisibly, which is the exact property the script exists to
-prevent. `preset=` now takes a `SessionPreset` or nothing — a real signature change,
-and a mapping is refused rather than ignored. One part of the old design improved on
-the way out: the forbidden keys were a runtime check, and are now structural, because
-`SessionPreset` has no field that could carry an index-referencing list.
+**A session's defaults, twice.** This happened twice over, and the second time is why
+the first time was not enough.
+
+*The file.* `load_preset` read JSON or TOML from `$XOPAT_SESSION_CONFIG` and merged it
+under every session, and `parse_preset` validated the document against `FORBIDDEN_KEYS`
+and `PRESET_KEYS`. It contradicted *Not doing*, was documented nowhere a reader could
+see, and was strictly less expressive than the script it was supposed to simplify. An
+environment variable nobody typed could change a report's numbers, invisibly, which is
+the exact property the script exists to prevent.
+
+*The object that replaced it.* `SessionPreset` kept the merging and dropped the file —
+which fixed the invisible input and kept the actual problem, that a second vocabulary
+sets what the call already sets. It was deleted with the file's reasoning applied
+consistently: every one of its seven fields (`params`, `plugins`, `layers`, `protocol`,
+`options`, `lossless`, `endpoint`) is an argument of `from_slide`, so it added
+indirection and no capability. The tell was that the skill never taught it — an agent
+reading `SKILL.md`, the four references and the README meets `SessionPreset` zero
+times, and a knob the writer of the report is never told about is a knob that does not
+exist. `test_every_session_default_is_an_argument_of_the_call` pins the absence through
+`inspect.signature` rather than by asserting a refusal, because a refusal is a
+compatibility shim and the point is that there is nothing to pass.
+
+Two properties survived, which is what the deletion had to preserve. A preset could
+carry no index-referencing list, so `data`/`background`/`visualizations` were unnameable
+in it; with no preset at all there is still no route for one, and
+`test_nothing_outside_the_call_can_supply_a_session_default` checks that against a live
+`$XOPAT_SESSION_CONFIG` rather than a stub. And the one default the tool keeps — lossless
+overlay tiles, because a class map's colours do not survive JPEG — is now a keyword
+default, so a caller can turn it off; a preset-level default could not have offered that
+without the preset coming back.
 
 **The validation gate** (`a529e0a`). `schema/` (2,400 generated lines),
 `derive_schema.py`, `contract.py`, `audit.py`, `shader.py`, `strict=`. See *What
@@ -238,7 +256,8 @@ because the plumbing was the complaint about the original tool, not its YAML.
 
 Unchanged by the reversals, and still the part of this file most likely to be right.
 
-**Precedence:** builtin preset → pasted config → kwargs.
+**Precedence:** pasted config → the arguments of the call. Nothing is merged in from
+outside either of those.
 
 - `params` **deep-merges** (it is a settings bag).
 - `data` / `background` / `visualizations` / `plugins` **replace**. Lists carrying
@@ -265,7 +284,6 @@ Fails loudly:
 | A protocol name that looks like inline JS | `_reject_inline_protocol` — the viewer strips it silently, so this is caught early |
 | No mask file for any case (mistyped run id or artifact dir) | `MlflowError`, naming the sources with zero hits |
 | A palette/breaks/classes mismatch | `colormap_layer` raises rather than emitting a layer the viewer rejects |
-| `preset=` handed a mapping or a path | `XopatError` — silently falling back to the builtin would build the report on defaults the script never named |
 | A background or shader with no `dataReference` at all | `XopatError` |
 
 Fails quietly, on purpose or for now:
@@ -313,7 +331,6 @@ report_fast/
 ├── session.py    XopatSession, SessionTemplate, folder/path helpers   (no FastHTML)
 ├── layer.py      the two layer shapes it is worth building
 ├── masks.py      Mask + its source (Drive / MlflowRun) → sessions, coverage, dropped
-├── config.py     SessionPreset, built in code: builtin → preset → kwargs
 ├── mlflow.py     runs in / report out; the only MLflow importer
 ├── core.py       Report: the page shell, BASE_CSS, the two prose fields
 ├── components/   SlideCard, SlideGrid
@@ -410,12 +427,14 @@ Run ids that are referenced elsewhere and are not otherwise rediscoverable live 
 
 ## Open
 
-- **`SessionTemplate` and `SessionPreset`.** Both are public API from before the CLI
-  went. `SessionTemplate.bind()` is the honest answer to refilling a hand-authored
-  session 300 times, so it has a job. `SessionPreset` is now a small in-code object
-  with no file behind it, which makes it cheap to keep and cheap to delete; it has no
-  caller in the skill, and a `params` dict passed to `from_slide` covers the same
-  ground for a single session. It stays until something argues for it.
+- **`SessionTemplate` is public API the skill does not teach.** Its job is real —
+  `bind()` is the honest answer to refilling one hand-authored session 300 times, which
+  neither `case_matrix` nor a `from_slide` loop does. But it is another name this library
+  exports that an agent reading the skill never meets, which is how `SessionPreset` ended
+  up deleted. So either the skill gains a paragraph on when a template beats a loop, or
+  the class goes and the 300-case authored shape becomes a `for` loop over `from_config`
+  and `bind_name`. Unresolved because the two answers cost different things: the
+  paragraph is skill length, the deletion is a capability.
 - **The skill's version stamp is handwritten.** `SKILL.md` says "xOpat 3.1.0 @
   `18c94f2`" and nothing regenerates it — deliberately, since the thing it would
   regenerate from was the deleted generator. The skill therefore tells the agent to

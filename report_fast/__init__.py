@@ -43,7 +43,6 @@ typed.
 """
 
 from .components import SlideCard, SlideGrid
-from .config import BUILTIN_PRESET, SessionPreset
 from .core import BASE_CSS, BaseComponent, ComponentRegistry, Report, Section
 from .layer import colormap_layer, heatmap_layer
 from .masks import (
@@ -81,9 +80,6 @@ __all__ = [
     "sessions_from_folder",
     "sessions_from_paths",
     "layers_from_files",
-    # defaults
-    "SessionPreset",
-    "BUILTIN_PRESET",
     # the wire format
     "XopatEndpoint",
     "XopatError",
