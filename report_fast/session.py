@@ -875,14 +875,6 @@ class SessionTemplate:
         return bound
 
 
-def layers_from_files(
-    slide: Slide,
-    mask_sets: Mapping[str, Sequence[Slide]],
-) -> List[Dict[str, Any]]:
-    """Map `{label: mask path}` for one slide into overlay layers."""
-    return [{"path": mask, "name": label} for label, mask in mask_sets.items()]
-
-
 def sessions_from_paths(
     slides: Iterable[Slide],
     *,
@@ -1063,7 +1055,6 @@ __all__ = [
     "XopatSession",
     "SessionTemplate",
     "as_session",
-    "layers_from_files",
     "sessions_from_paths",
     "sessions_from_folder",
 ]

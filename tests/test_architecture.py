@@ -140,6 +140,7 @@ def test_there_is_no_copy_of_the_viewer_vocabulary():
 def test_no_module_is_named_for_a_format_that_no_longer_exists():
     """The deleted organs, listed so their names do not come back one at a time."""
     gone = (
+        "config.py",
         "manifest.py",
         "provenance.py",
         "compose.py",
@@ -185,6 +186,43 @@ def test_the_component_set_is_the_two_it_is_supposed_to_be():
         "say why here -- a component is a way for two reports to stop looking "
         "like the same report"
     )
+
+
+def test_a_component_is_reached_by_importing_it():
+    """No name -> class map, because nothing can carry the name.
+
+    `ComponentRegistry` mapped `"slide-card"` to a class so that components could
+    be *created from a config file* -- its own docstring said so. The config file
+    went first, and `test_the_library_reads_no_config_files` keeps it gone, which
+    left the registry as the input side of a deleted format: a lookup no caller
+    has, whose only reader was the test that tested the lookup.
+
+    Checked as a capability rather than as a class name, because the reflex this
+    forbids is reasonable-looking -- "let the script pick a component by name" --
+    and would arrive with a different class name. Anything exported that turns a
+    string into a component is a second door into a two-component set, which is
+    what `test_the_component_set_is_the_two_it_is_supposed_to_be` exists to keep
+    closed.
+    """
+    import inspect
+
+    import report_fast
+
+    assert "ComponentRegistry" not in report_fast.__all__
+
+    for name in report_fast.__all__:
+        owner = getattr(report_fast, name)
+        if not inspect.isclass(owner):
+            continue
+        # `getmembers(owner, callable)` and not `vars` + `callable`: a class's
+        # `vars` hold the raw `classmethod` object, and `callable()` is False for
+        # that -- the first version of this check read an actual resolver's method
+        # set as empty and passed on the thing it forbids. `getmembers` goes
+        # through `getattr`, which binds the descriptor into a method.
+        methods = {attribute for attribute, _ in inspect.getmembers(owner, callable)}
+        assert not {"register", "create"} <= methods, (
+            f"{name} resolves components by name; a report names them by importing them"
+        )
 
 
 def test_no_public_name_escapes_html():

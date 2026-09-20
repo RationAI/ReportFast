@@ -58,7 +58,7 @@ from fasthtml.common import (
     to_xml,
 )
 
-__all__ = ["BaseComponent", "ComponentRegistry", "Report", "Section"]
+__all__ = ["BaseComponent", "Report", "Section"]
 
 
 class BaseComponent:
@@ -95,34 +95,6 @@ class BaseComponent:
 
     def to_html(self) -> str:
         return to_xml(self.render())
-
-
-class ComponentRegistry:
-    """Name -> class map, so components can be created from a config file."""
-
-    _components: dict = {}
-
-    @classmethod
-    def register(cls, name: str, component_class: type) -> None:
-        if not issubclass(component_class, BaseComponent):
-            raise TypeError(f"{component_class} must inherit from BaseComponent")
-        cls._components[name] = component_class
-
-    @classmethod
-    def get(cls, name: str) -> type:
-        if name not in cls._components:
-            raise KeyError(
-                f"Component '{name}' not found. Registered: {list(cls._components)}"
-            )
-        return cls._components[name]
-
-    @classmethod
-    def list(cls) -> List[str]:
-        return list(cls._components)
-
-    @classmethod
-    def create(cls, name: str, **kwargs) -> BaseComponent:
-        return cls.get(name)(**kwargs)
 
 
 BASE_CSS = """

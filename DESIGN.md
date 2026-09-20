@@ -208,6 +208,28 @@ deliberately rather than a string you passed.
 longer pulls numpy, pillow, contourpy and fonttools to render a figure nobody can
 make.
 
+**The orphan the same deletion left behind.** `ComponentRegistry` mapped
+`"slide-card"` to a class *so components could be created from a config file* — its
+own docstring, quoted. The manifest went first and `test_the_library_reads_no_config_files`
+keeps it gone, which left a name → class lookup with no caller able to carry a name:
+the input side of a format that no longer exists, read only by the test that tested the
+lookup. `layers_from_files` went the same way (a six-line helper whose `slide` argument
+was discarded and which nothing in the library called, beside two other stem-join
+implementations), and so did `XOPAT_MAJOR` — the major version once selected a URL
+shape; there is one shape and nothing read the constant.
+
+What replaces the registry is a capability check, not a class-name check:
+`test_a_component_is_reached_by_importing_it` fails on *any* exported class that
+resolves a component by name, because the reflex worth forbidding — "let the script
+pick a component by name" — would arrive under a different name. Writing it surfaced a
+trap worth recording, since it is the reason a guard can look present and be absent: the
+first version read a class's `vars()` and filtered on `callable()`, which is False for a
+raw `classmethod` object, so a real resolver's method set read as empty and the
+assertion passed on the exact thing it forbids. `inspect.getmembers(owner, callable)`
+goes through `getattr` and binds the descriptor. Both branches were checked by
+reintroducing the regression, and the first attempt at that check passed silently, which
+is how this was caught.
+
 **The provenance sidecar** (`e705d7e`). `report.provenance.json` beside every report:
 endpoint, viewer stamp, inputs, every DataID, the design as authored. It answered a
 question the manifest had created. Once the report is a script, the script answers it
@@ -354,6 +376,11 @@ they are the ones worth reading before changing anything:
   back one file at a time.
 - `test_the_component_set_is_the_two_it_is_supposed_to_be` — asserts the exported set,
   not the files on disk, because the promise is about what someone can `import`.
+- `test_a_component_is_reached_by_importing_it` — the companion to the above, and worth
+  reading before writing any check that walks a class's methods: its first version was
+  vacuous in the specific way such a check usually is (`callable()` is False for a raw
+  `classmethod`, so a resolver's methods read as absent). See *The orphan the same
+  deletion left behind*.
 - `test_no_workflow_publishes` — greps the workflow files. A publish step is what a
   helpful person adds while trying to be useful, and it would pass review, pass tests,
   and upload. Comments are stripped first: the workflow that must not publish is the

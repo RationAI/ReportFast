@@ -55,8 +55,6 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Union
 
 from .layer import DEFAULT_LAYER_TYPE
 
-XOPAT_MAJOR = 3
-
 #: The RationAI host serves the majors side by side under separate mounts — v2
 #: at `/xopat/`, where the deleted `redirect.php` relay used to live, and v3 at
 #: `/v3/`. The mount selects the viewer version, so a session sent to `/xopat/`
@@ -392,7 +390,6 @@ def session_fragment(session: Mapping[str, Any]) -> str:
 
 
 __all__ = [
-    "XOPAT_MAJOR",
     "XopatError",
     "XopatEndpoint",
     "DEFAULT_BASE_URL",

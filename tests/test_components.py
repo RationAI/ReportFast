@@ -178,14 +178,6 @@ def test_section_groups_blocks_and_collapses_without_javascript():
     assert "open" not in closed
 
 
-def test_registry_creates_components_by_name():
-    from report_fast import ComponentRegistry
-
-    assert "slide-grid" in ComponentRegistry.list()
-    card = ComponentRegistry.create("slide-card", session=session())
-    assert isinstance(card, SlideCard)
-
-
 # ── slide card ──────────────────────────────────────────────────────────────
 
 

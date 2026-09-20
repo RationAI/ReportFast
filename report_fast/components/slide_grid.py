@@ -26,7 +26,7 @@ from fasthtml.common import (
     Summary,
 )
 
-from ..core import BaseComponent, ComponentRegistry
+from ..core import BaseComponent
 from ..session import XopatSession, as_session
 from ..xopat import XopatEndpoint
 
@@ -313,7 +313,3 @@ def _heading(text: str) -> FT:
     from fasthtml.common import H2
 
     return H2(text)
-
-
-ComponentRegistry.register("slide-card", SlideCard)
-ComponentRegistry.register("slide-grid", SlideGrid)

@@ -43,7 +43,7 @@ typed.
 """
 
 from .components import SlideCard, SlideGrid
-from .core import BASE_CSS, BaseComponent, ComponentRegistry, Report, Section
+from .core import BASE_CSS, BaseComponent, Report, Section
 from .layer import colormap_layer, heatmap_layer
 from .masks import (
     CaseMatrix,
@@ -59,7 +59,6 @@ from .session import (
     SessionTemplate,
     XopatSession,
     as_session,
-    layers_from_files,
     sessions_from_folder,
     sessions_from_paths,
 )
@@ -79,7 +78,6 @@ __all__ = [
     "as_session",
     "sessions_from_folder",
     "sessions_from_paths",
-    "layers_from_files",
     # the wire format
     "XopatEndpoint",
     "XopatError",
@@ -91,7 +89,6 @@ __all__ = [
     "Report",
     "Section",
     "BaseComponent",
-    "ComponentRegistry",
     "BASE_CSS",
     # components -- the whole set
     "SlideCard",
