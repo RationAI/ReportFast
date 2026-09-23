@@ -239,8 +239,8 @@ The builder never opens a slide. A session names files by path, and the machine
 building the report and the tile server must see the same file under the same
 root — nothing checks this, and the failure surfaces when someone opens the page.
 
-So probe, then say what you probed. Every distinct DataID, against the viewer's
-own first request — **batched, and bounded**:
+So probe, then say what you probed. Every distinct DataID, once, against the
+viewer's own first request — **batched, and bounded**:
 
 ```bash
 printf '%s\n' "$DATA_IDS" | xargs -P 8 -I{} -n1 sh -c \
@@ -267,6 +267,15 @@ Three outcomes, and they are not the same sentence:
 - **`000`, no response** — you cannot reach the tile server from where you are
   standing. This is common and it is not a broken report. Say *"built, links
   unverified from here"* — never "works", and never "broken".
+
+**The probe is one pass over the DataIDs, not a check inside the build.** The library
+never opens a slide and never contacts a server while building — it lists a run's
+artifacts once, then formats strings. A report that takes tens of minutes is spending
+them outside the library: per-card probing, per-card regeneration, or retrying a curl
+that was never going to answer. If the probe says `000`, stop probing and say so;
+repeating an unreachable request per card turns one unanswered question into forty
+minutes of them. Skipping the probe entirely is legitimate — what is not legitimate is
+reporting success without it.
 
 ## MLflow
 
