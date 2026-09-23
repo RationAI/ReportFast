@@ -10,31 +10,52 @@ from folders needs no mlflow: `Drive` is a `Mask` source like `MlflowRun`, and a
 cannot even be imported. Verified on an interpreter with no mlflow: two cases, one mask
 row, page rendered. So a project pinned to mlflow 3 that reads its masks off a mount
 does not need a separate reporting environment — only a report that *reads a run*'s
-artifacts or publishes to one does, and then the cap below applies to that environment
-alone.
+artifacts or publishes to one needs the extra at all, and the two-server notes below
+say what each server asks of the client.
 
-## Two addresses
+## There are two tracking servers
 
-| | Address | Reachable from |
-| --- | --- | --- |
-| Tracking API | `http://mlflow.rationai-mlflow:5000/` | inside the cluster, this pod included |
-| Web UI | `https://mlflow.rationai.cloud.trusted.e-infra.cz/` | a browser; the links a report shows |
+| | Tracking API (cluster-internal) | Web UI (browser) | Server version |
+| --- | --- | --- | --- |
+| **old** | `http://mlflow.rationai-mlflow:5000/` | `https://mlflow.rationai.cloud.trusted.e-infra.cz/` | 2.16.2 |
+| **s3** | `http://mlflow-s3.rationai-mlflow/` | `https://mlflow-s3.rationai.cloud.trusted.e-infra.cz/` | 3.16.0 |
 
-The tracking server speaks **2.x** and the extra is capped `mlflow>=2.8,<3` —
-pinned to the deployment, not chosen. Verified against the live server with an
-mlflow 3.16 client: `get_run` and `get_experiment_by_name` still answer, but
-`list_artifacts` — which is what `slides()`, `artifacts()` and `data_ids()` walk —
-routes through `/mlflow/logged-models/search`, an endpoint this server has never
-had, and 404s. So an mlflow 3 environment reads run metadata fine and then reports
-that a run holds no files, which reads as an empty run rather than a version
-mismatch.
+Both tracking APIs answer from inside the cluster with no auth; neither is
+reachable from outside it. Each server has its own experiment ids and its own
+artifacts — the same experiment number means nothing across them, so a run id
+that 404s on one is not proof the run does not exist. `Mlflow` picks the server
+by `tracking_uri` (or `$MLFLOW_TRACKING_URI`); everything else about it stays
+the same.
 
-**A project that needs mlflow 3 keeps it and gives reporting its own
-environment** — a `uv` project per reporting job, or `uvx`. That is the supported
-answer while the server speaks 2.x; the alternative is this library reimplementing
-artifact listing over the raw REST endpoint the server does answer
-(`/api/2.0/mlflow/artifacts/list`), which is a second protocol to maintain and has
-not been ruled in.
+**Which server a report's data lives on is a question to ask, not to guess.**
+The DataID prefix and the server travel together — the tile server resolves
+`mflow` to one artifact store and `public_mlflow` to the other, and a DataID
+that names the wrong store is the silent failure SKILL.md names. So when you
+are told a run id, establish its server first: list the run on both (a run id
+either answers or says `RESOURCE_DOES_NOT_EXIST`, cheaply), or ask.
+
+**Client version is a smaller decision than it used to be.** Measured against
+both live servers on 2026-09-23, with both client lines:
+
+| | read the old 2.16 server | publish to it | read the s3 3.16 server | publish to it |
+| --- | --- | --- | --- | --- |
+| mlflow 2.x client | yes | yes | yes | yes (via `publish()`) |
+| mlflow 3.x client | yes | **no — 404** | yes | yes |
+
+The one real incompatibility is a 3.x client **writing** to the old server: its
+`log_artifacts` routes through `/mlflow/logged-models/search`, an endpoint a 2.x
+server does not have, and 404s. Reads go through the older REST routes and work
+everywhere, both directions. Earlier text in this file claimed 3.x *listing*
+404s against the old server; measured, it does not — the failure is on the write
+path, and the old claim is kept here only so that anyone who repeats it finds
+this measurement instead of a contradiction.
+
+**So: a project on mlflow 3 needs no separate reporting environment.** Install
+`report-fast[mlflow]` and build reports freely from both servers; only
+`publish()` to the *old* one is blocked, and its error is loud (a 404 naming
+the endpoint), not silent. Publishing there means a 2.x client — `uvx` or a
+throwaway env — or publishing to the s3 server instead, which is where new
+work should publish anyway.
 
 `Mlflow.from_env()` reads `MLFLOW_TRACKING_URI`, `MLFLOW_WEB_URL` and
 `REPORTFAST_MLFLOW_ARTIFACT_PREFIX`. Credentials go through the environment or
@@ -48,6 +69,9 @@ A report does not need the pixels. An artifact has an address the tile server
 resolves on its own — `mflow/<experiment_id>/<run_id>/artifacts/<path>`, built by
 `artifact_data_id()` — so a mask goes into a session as a path and is streamed to
 the reader's browser. `Mlflow.download()` is the only thing that moves bytes, and
+its destination directory must already exist — mlflow's own contract, and an
+agent that passes a path it never created gets a confusing error about the
+destination rather than one about the run.
 it is for the cases where the artifact is *data*: a predictions table, a
 measurements CSV.
 

@@ -15,10 +15,14 @@ reportfast = "report_fast.__main__:main"
 
 [project.optional-dependencies]
 # Only report_fast.mlflow talks to the tracking API; import it and the rest of
-# the package keeps working without this. Capped below 3 because the deployment
-# runs a 2.x tracking server: a 3.x client calls endpoints it does not have
-# (listing artifacts 404s on /mlflow/logged-models/search).
-mlflow = ["mlflow>=2.8,<3"]
+# the package keeps working without this. The deployment runs two tracking
+# servers (2.16.2 and 3.16.0) and the 2.x client reads and writes both; a 3.x
+# client reads both as well, and fails only when publishing to the OLD server
+# (log_artifacts 404s on /mlflow/logged-models/search, measured 2026-09-23).
+# The cap is a supported floor/ceiling, not a deployment lock: the floor is
+# where list_artifacts pagination settled, the ceiling is where nothing has
+# been measured. Measured matrix: skills/reportfast/references/mlflow.md.
+mlflow = ["mlflow>=2.8,<4"]
 
 [dependency-groups]
 # The self-dependency pulls the mlflow extra so `uv sync --group dev` is enough to

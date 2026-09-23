@@ -72,9 +72,13 @@ uv add "report-fast[mlflow] @ git+https://github.com/RationAI/reporting.git"  # 
 uv add --editable /path/to/reporting                                # a checkout
 ```
 
-One extra, `mlflow`, capped `>=2.8,<3` because the deployment runs a 2.x tracking
-server and a 3.x client 404s listing artifacts. Everything else needs only
-`python-fasthtml`, and `import report_fast` works without the extra. Python 3.10+.
+One optional extra, `mlflow` (`>=2.8,<4`). The deployment runs two MLflow tracking
+servers (a 2.16 one and an s3-backed 3.16 one); both client major versions read both,
+and the only measured break is a 3.x client publishing to the 2.16 server — a loud
+404, not a silent one. Which server a report is built against is a per-call choice
+(`Mlflow(tracking_uri=…)` / `$MLFLOW_TRACKING_URI`); the artifact prefix travels with
+the server. Everything else needs only `python-fasthtml`, and `import report_fast`
+works without the extra at all. Python 3.10+.
 
 ## Python
 

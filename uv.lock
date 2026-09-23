@@ -2476,7 +2476,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=2.8,<3" },
+    { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=2.8,<4" },
     { name = "python-fasthtml", specifier = ">=0.5.0" },
 ]
 provides-extras = ["mlflow"]

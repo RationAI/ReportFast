@@ -255,11 +255,13 @@ Three outcomes, and they are not the same sentence:
 
 Read `references/mlflow.md` before touching a run. Four things matter immediately:
 
-- The tracking server speaks the **2.x** API. The extra is capped
-  `mlflow>=2.8,<3`; under a 3.x client `MlflowClient.list_artifacts` 404s, so a run
-  reads as holding no files. A project pinned to mlflow 3 keeps it — give the report
-  its own environment (`uv` project per reporting job, or `uvx`) instead of
-  downgrading the project.
+- There are **two tracking servers** (an old 2.16 one and an s3-backed 3.16 one),
+  each with its own runs and its own artifact store; the client reads both either
+  version, and the one break is a 3.x client *publishing* to the old server (a loud
+  404). Ask which server a run lives on before listing it — a run id that 404s on
+  one proves nothing about the other, and its artifact prefix travels with the
+  server. Addresses, the measured compatibility matrix, and what each env var
+  selects: `references/mlflow.md`.
 - Artifacts are **addressed, never downloaded**. A run's artifact becomes the
   DataID `mflow/<experiment_id>/<run_id>/artifacts/<path>`, and `mflow` is a
   namespace the tile server resolves — not a directory on your machine. If the
@@ -280,7 +282,8 @@ configured, list environment variable *names*, never their values.
   checklist.
 - `references/deployment.md` — this cluster's addresses, how a path becomes a
   DataID, the artifact prefix, every environment variable.
-- `references/mlflow.md` — listing a run, the 2.x cap, publish as an explicit act.
+- `references/mlflow.md` — the two tracking servers and how to tell which one a
+  run lives on, listing a run, publish as an explicit act.
 - `references/hydra-v2-to-v3.md` — mapping the old tool's Hydra config onto this
   library, key by key.
 - **Golden sessions to imitate** — `reportfast skill show --reference

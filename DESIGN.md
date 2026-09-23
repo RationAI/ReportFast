@@ -461,8 +461,19 @@ design:
   either attached to a run or into one it creates. The description goes in as
   `mlflow.note.content` because that is what the UI reads and current clients no longer
   expose `update_run_description`.
-- **Two URLs, not one.** `tracking_uri` is the cluster-internal API, `web_url` is the
-  link a browser opens; the original tool hardcoded the second.
+- **Two URLs, not one — and two servers, not one.** `tracking_uri` is the
+  cluster-internal API, `web_url` is the link a browser opens; the original tool
+  hardcoded the second. The deployment has since grown a second tracking server
+  (an s3-backed 3.16 next to the 2.16), each with its own UI host, its own
+  experiment ids, and its own DataID store — so the two knobs must name the
+  *same* server, and `Mlflow` holds no opinion about which that is: it is a
+  constructor argument and an environment pair, nothing more.
+- **The client-version cap is a measurement, not a folklore floor.** Measured
+  across both servers and both client majors (2026-09-23): the 2.x client reads
+  and writes both servers; a 3.x client reads both and fails only writing to
+  the 2.16 one, loudly. What the docs used to claim — 3.x listing 404s — was
+  the write path misremembered as the read path; the correction, with the
+  matrix, is in `references/mlflow.md`, and the cap moved `<3` → `<4` with it.
 
 Publishing is never a side effect of building. Not from a config key, not from CI, not
 from a prompt that mentioned MLflow in passing. An artifact logged to somebody's run is

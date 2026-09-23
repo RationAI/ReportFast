@@ -106,16 +106,21 @@ root, and anything it cannot make relative passes through untouched:
   alone is not enough to write an artifact DataID by hand — which is why masks
   come from an `MlflowRun` source and the DataID is built for you.
 
-## MLflow is two addresses, not one
+## MLflow is two servers, each with two addresses
 
-| | Address | Reachable from |
-| --- | --- | --- |
-| Tracking API | `http://mlflow.rationai-mlflow:5000/` | inside the cluster — **including this pod** |
-| Web UI | `https://mlflow.rationai.cloud.trusted.e-infra.cz/` | a browser; the links inside a report |
+| | Tracking API | Web UI (run links) | Version |
+| --- | --- | --- | --- |
+| old | `http://mlflow.rationai-mlflow:5000/` | `https://mlflow.rationai.cloud.trusted.e-infra.cz/` | 2.16.2 |
+| s3 | `http://mlflow-s3.rationai-mlflow/` | `https://mlflow-s3.rationai.cloud.trusted.e-infra.cz/` | 3.16.0 |
 
-- The tracking server speaks the **2.x** API. The extra is capped
-  `mlflow>=2.8,<3`: a 3.x client calls endpoints this server does not have and
-  listing artifacts 404s.
+- Tracking APIs answer from inside the cluster only, no auth; the Web UIs answer
+  browsers on the network, and a report's `link()` must point at the UI of the
+  server the run actually lives on (`MLFLOW_WEB_URL` / `Mlflow(web_url=…)`, since
+  `link()` is what a reader clicks). Experiment ids are per server, so one run id
+  answering on neither is two cheap questions, not a missing run.
+- Both client major versions list artifacts on both servers. The one measured
+  break is a 3.x client `log_artifacts` against the 2.16 server (404 on
+  `/mlflow/logged-models/search`), loudly — matrix in `references/mlflow.md`.
 - `web_url=None` disables `link()`, leaving a report with no run links rather
   than links to a host its reader cannot reach.
 

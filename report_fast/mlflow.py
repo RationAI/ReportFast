@@ -66,7 +66,9 @@ DEFAULT_ARTIFACT_PREFIX = "mflow"
 
 #: Base of the run links put in the report. Separate from the tracking URI
 #: because the UI a browser reaches is usually not the host the API is served
-#: on -- the cluster URI resolves only inside the cluster.
+#: on -- the cluster URI resolves only inside the cluster. This is the OLD
+#: server's UI; the s3 server's is .../mlflow-s3.rationai.../ (deployment.md
+#: names both) and a report built against s3 must override web_url or $MLFLOW_WEB_URL.
 DEFAULT_WEB_URL = "https://mlflow.rationai.cloud.trusted.e-infra.cz/"
 
 #: Artifact directory a published report lands in: the layout the original tool
@@ -147,7 +149,14 @@ class Mlflow:
 
     @classmethod
     def from_env(cls, **overrides: Any) -> "Mlflow":
-        """Read `MLFLOW_TRACKING_URI` / `MLFLOW_WEB_URL` / `REPORTFAST_MLFLOW_ARTIFACT_PREFIX`."""
+        """Read `MLFLOW_TRACKING_URI` / `MLFLOW_WEB_URL` / `REPORTFAST_MLFLOW_ARTIFACT_PREFIX`.
+
+        The deployment has two tracking servers, each with its own Web UI. Only
+        one var changes when the report moves between them and the others keep
+        their defaults, so point at the second server by setting both: its URI
+        *and* its UI address, or `link()` sends readers to a server that does
+        not know the run.
+        """
         values: Dict[str, Any] = {
             "tracking_uri": os.environ.get("MLFLOW_TRACKING_URI") or None,
             "web_url": os.environ.get("MLFLOW_WEB_URL") or DEFAULT_WEB_URL,
