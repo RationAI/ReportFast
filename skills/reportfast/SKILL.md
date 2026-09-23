@@ -21,6 +21,23 @@ show` is for someone with `uv add report-fast` and no checkout — the skill tra
 inside the wheel. Use `uvx report-fast skill show`, or `uv run reportfast skill
 show`, when `reportfast` is not on `PATH`.
 
+## Using an agent that is not Claude Code
+
+Nothing here is specific to a vendor: this file is markdown, the library is plain
+Python, and any agent that can read a file and run a shell follows the same
+procedure. To wire one up, create the context file that agent reads at startup —
+`AGENTS.md` and `QWEN.md` are common names; check what yours loads — and put in it
+a pointer, not a copy:
+
+> Before writing any report script, run `uvx report-fast skill show` and follow
+> it, including the references it names.
+
+Do not paste this file's text into that pointer file. The skill is versioned with
+the library and gains corrections as deployments break in new ways; a pasted copy
+is a snapshot that starts lying the day the package updates, and every failure it
+then causes looks like this tool's fault. The pointer cannot go stale because it
+re-reads at the moment of use.
+
 The script is the report's record. It is not written into the page, not logged
 beside it, and not stored anywhere by the library — so ask where it should live.
 "Somewhere in chat" is a fine answer for a one-off. For a report that gets re-run,
