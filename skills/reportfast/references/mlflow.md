@@ -152,7 +152,8 @@ print(published)    # report/report.html on run e313fc2a… -- <web link>
 - It returns a `Published(run_id, artifact, url, created_run)`. Print it — the
   run and the artifact path are the whole answer to "where did it go".
 - `extra_dir` logs a directory under `report/conf`, the slot the original
-  reporting tool used for the Hydra configuration.
+  reporting tool used for the Hydra configuration. It is where a provenance
+  manifest goes — SKILL.md, *What a report is recorded by*.
 - `web_url=None` turns `link()` off, so the report gets no run links rather than
   links to a host its reader cannot reach.
 

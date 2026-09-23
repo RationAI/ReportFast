@@ -161,6 +161,71 @@ session.to_config()           # the document, unchanged
 card = SlideCard(session)     # and the page's one affordance for it
 ```
 
+## What a report is recorded by
+
+The record of a report is the script that built it: it names the folders, the runs,
+the cohort, the colours and the layout, and it can be re-run. A frozen copy of those
+inputs cannot be re-run, which is why the library stores none by default and
+`publish()` logs only the page.
+
+When someone asks for provenance *beside* the report — a colleague who wants to know
+what a page was made of without reading code, a run that should carry its inputs —
+write a manifest next to the HTML and save it with the report, on request. It is a
+few lines of YAML, and only the script knows its contents:
+
+```python
+import datetime, importlib.metadata, os
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+
+def host_only(uri):
+    """A tracking URI without any credentials it may be carrying."""
+    p = urlsplit(uri)
+    return urlunsplit((p.scheme, p.netloc.split("@")[-1], p.path, "", ""))
+
+manifest = {
+    "built": datetime.datetime.now().isoformat(timespec="seconds"),
+    "tool": f"report-fast {importlib.metadata.version('report-fast')}",
+    "sources": matrix.sources,        # {source label: files found}, one per listing
+    "cohort": only,                   # what was asked for, in report order
+    "shown": len(matrix.sessions),
+    "filtered_out": matrix.dropped,   # {case: layers} — what got cut, and why
+    "coverage": matrix.coverage,      # {mask name: cases it reached}
+    "environment": {
+        "MLFLOW_TRACKING_URI": host_only(os.environ.get("MLFLOW_TRACKING_URI", "")),
+        "XOPAT_MOUNT_ROOT": os.environ.get("XOPAT_MOUNT_ROOT", ""),
+        "REPORTFAST_MLFLOW_ARTIFACT_PREFIX": os.environ.get(
+            "REPORTFAST_MLFLOW_ARTIFACT_PREFIX", ""
+        ),
+    },
+}
+Path("report.yaml").write_text(yaml.safe_dump(manifest, sort_keys=False))
+```
+
+`case_matrix` counted all of that while building, so the manifest is a dump and not a
+second pass over the data. For a report built without `case_matrix`, name the sources
+by hand — the run ids and artifact paths, or the folders — because those are the lines
+a reader has no other way to recover.
+
+`yaml` is not a dependency of this library — it comes with `report-fast[mlflow]`, and a
+report built without that extra writes the same dict with `json.dumps` instead.
+
+Those three environment variables are the ones that change the DataIDs, so they are the
+ones worth recording; everything else a reader needs is already in `sources` and the
+cohort. They are addresses rather than secrets — **unless** someone's
+`MLFLOW_TRACKING_URI` carries credentials in it, which is a legal form
+(`https://user:token@host/`) and would turn the manifest into a published token. That is
+what `host_only()` above is for; without it, a manifest next to a published report is a
+leaked credential.
+
+Never add a password or token variable to the manifest: the block holds only variables
+whose values are addresses, which is why those three are safe and
+`MLFLOW_TRACKING_PASSWORD` is not a fourth.
+
+`publish(extra_dir=…)` logs such a directory under `report/conf`, the slot the original
+tool used for its Hydra configuration, so a manifest written next to the page travels
+with it in one argument.
+
 ## What the page can contain
 
 `Report` takes `title`, `subtitle`, `preamble`, `blocks`, `theme`, `css`. There

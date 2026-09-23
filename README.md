@@ -184,7 +184,8 @@ Credentials go through the environment, never into a script or a report.
 inputs, so `publish()` stores no config by default — the script names the folders,
 colours, order and layout and can be re-run, which a frozen config cannot. Where a
 run should carry the inputs anyway, `publish(extra_dir=…)` logs a directory beside
-the page under `report/conf`.
+the page under `report/conf`; SKILL.md, *What a report is recorded by*, writes a
+provenance manifest into one.
 
 ## Configuration
 
