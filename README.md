@@ -80,6 +80,55 @@ and the only measured break is a 3.x client publishing to the 2.16 server — a 
 the server. Everything else needs only `python-fasthtml`, and `import report_fast`
 works without the extra at all. Python 3.10+.
 
+## Setting up your agent
+
+The library needs nothing else. The *agent* needs to know the skill exists —
+apply the one subsection that matches your agent; the steps are one-time.
+
+### Claude Code
+
+Claude loads skills from folders it scans, so install the library and copy the
+bundled skill where Claude looks — once per machine, then every project picks it
+up:
+
+```bash
+site_packages=$(dirname "$(python -c 'import report_fast; print(report_fast.__file__)')")
+cp -r "$site_packages/skill" ~/.claude/skills/reportfast
+```
+
+(From a working *checkout* of this repo rather than an install, `import
+report_fast` resolves to the checkout, which holds no bundled copy — take the
+source directly instead: `cp -r skills/reportfast ~/.claude/skills/reportfast`.)
+
+A new session then sees the skill and loads it automatically when a task matches
+its description. One caveat: that folder is a *copy*, so after a package update
+re-run the two lines — the wheel carries the corrections, and a stale copy is a
+stale procedure. To run Claude Code on the institution's models rather than
+Anthropic's subscription, Cerit documents the VS Code integration
+[here](https://docs.cerit.io/en/docs/ai-as-a-service/llm-integration#visual-studio-code-integration).
+
+### Any other agent (Qwen Code, Codex, …)
+
+Other agents read a startup-instructions file instead of scanning skill folders —
+`AGENTS.md`, `QWEN.md`, or whatever yours loads at session start. Commit a pointer
+to it in the project where reports get built:
+
+```bash
+echo 'Before writing any report script, run `uvx report-fast skill show` and follow it, including the references it names.' >> AGENTS.md
+```
+
+The sentence is a pointer, not a copy: the agent runs the command and reads the
+skill fresh from the package, so there is nothing to re-copy when the package
+updates. `uvx` fetches the package on the spot, so this works even before the
+library is installed in the project's environment. Commit it once and every
+teammate's sessions pick it up.
+
+### No agent
+
+No setup exists, because none is needed: `reportfast skill show` prints the
+procedure, and a person who follows it and writes the script produces the same
+report. Every code path in the library is ordinary Python with no model call.
+
 ## Python
 
 ```python
